@@ -65,6 +65,7 @@ pub mod prelude {
     pub use crate::frame::{CalibrationQuality, CoordinateFrame};
     pub use crate::gate::{Gate, ProbeGate};
     pub use crate::io::{
-        CalibrationIo, CaptureError, Frame, IoFactory, MarkerError, MarkerShape, MarkerStyle, PixelFormat,
+        CalibrationIo, CaptureError, CaptureIo, Frame, IoFactory, MarkerError, MarkerShape, MarkerStyle,
+        PixelFormat,
     };
 }

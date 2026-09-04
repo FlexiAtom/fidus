@@ -5,7 +5,7 @@ use crate::env::EnvironmentContext;
 use crate::estimate::{EstimateError, ProbabilisticPosition};
 use crate::frame::CoordinateFrame;
 use crate::gate::Gate;
-use crate::io::{CalibrationIo, IoFactory};
+use crate::io::{CalibrationIo, CaptureIo, IoFactory};
 
 /// B layer — calibrator (spec §3.1).
 ///
@@ -28,13 +28,14 @@ pub trait Calibrator: Send {
 /// C layer — estimator (spec §3.2).
 ///
 /// Performs incremental tracking in steady state, using only visual and
-/// interaction measurements (spec §6.1 whitelist) taken through the
-/// [`CalibrationIo`] session, in the coordinates of the active frame.
+/// interaction measurements (spec §6.1 whitelist) taken through a
+/// capture-only [`CaptureIo`] session — it structurally cannot project
+/// markers — in the coordinates of the active frame.
 pub trait Estimator: Send {
     /// Produces the next position estimate for the tracked target.
     fn estimate(
         &mut self,
-        io: &mut dyn CalibrationIo,
+        io: &mut dyn CaptureIo,
         frame: &CoordinateFrame,
     ) -> Result<ProbabilisticPosition, EstimateError>;
 }
@@ -134,12 +135,14 @@ impl FallbackEngine {
     }
 
     /// Produces the next position estimate for the tracked target.
+    ///
+    /// Runs on a capture-only session: no overlay surface exists during
+    /// steady-state estimation (spec §4.4).
     pub fn estimate(&mut self) -> Result<ProbabilisticPosition, EstimateError> {
         let frame = self.frame.as_ref().ok_or(EstimateError::NotCalibrated)?;
-        let mut io = self
-            .io_factory
-            .open()
-            .map_err(|e| EstimateError::Capture(crate::io::CaptureError::Backend(e.to_string())))?;
+        let mut io = self.io_factory.open_capture().map_err(|e| {
+            EstimateError::Capture(crate::io::CaptureError::Backend(e.to_string()))
+        })?;
         self.estimator.estimate(io.as_mut(), frame)
     }
 }

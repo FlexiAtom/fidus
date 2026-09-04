@@ -158,16 +158,24 @@ pub enum MarkerError {
     AlreadyDestroyed,
 }
 
+/// Capture-only sessions: the single primitive steady-state estimation
+/// needs.
+///
+/// Deliberately narrower than [`CalibrationIo`]: an estimator receives one
+/// of these and *cannot* project markers — "calibrate, then get out"
+/// (spec appendix A.5) enforced at the type level.
+pub trait CaptureIo: Send {
+    /// Captures the observed output as a top-down pixel frame.
+    fn capture(&mut self) -> Result<Frame, CaptureError>;
+}
+
 /// One live calibration/estimation session.
 ///
 /// Bundles the two primitives fidus relies on — screen capture and marker
 /// projection — plus the lifecycle rule from spec §4.4: the projector must be
 /// destroyed once coordinates have been extracted. `destroy_projector` is
 /// called explicitly by the calibrator and again on `Drop`; both are safe.
-pub trait CalibrationIo: Send {
-    /// Captures the calibrated output as a top-down pixel frame.
-    fn capture(&mut self) -> Result<Frame, CaptureError>;
-
+pub trait CalibrationIo: CaptureIo {
     /// Returns the usable-area size of the calibrated output in logical
     /// pixels, as announced by the compositor for fidus' own overlay surface.
     ///
@@ -192,11 +200,15 @@ pub trait CalibrationIo: Send {
     fn destroy_projector(&mut self) -> Result<(), MarkerError>;
 }
 
-/// Opens [`CalibrationIo`] sessions on demand.
+/// Opens [`CalibrationIo`] / [`CaptureIo`] sessions on demand.
 ///
-/// Implemented by platform backends. The returned session borrows the
+/// Implemented by platform backends. The returned sessions borrow the
 /// backend; backends serialize sessions internally.
 pub trait IoFactory: Send {
-    /// Opens a fresh session.
+    /// Opens a full calibration session (capture + projection).
     fn open(&mut self) -> Result<Box<dyn CalibrationIo + '_>, crate::engine::InitError>;
+
+    /// Opens a capture-only session for steady-state estimation: no overlay
+    /// surface is ever created (spec §4.4 teardown discipline).
+    fn open_capture(&mut self) -> Result<Box<dyn CaptureIo + '_>, crate::engine::InitError>;
 }

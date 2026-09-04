@@ -21,18 +21,18 @@
 use fidus_core::engine::Estimator;
 use fidus_core::estimate::{EstimateError, ProbabilisticPosition};
 use fidus_core::frame::CoordinateFrame;
-use fidus_core::io::CalibrationIo;
+use fidus_core::io::CaptureIo;
 
 /// Placeholder estimator: always reports that tracking is not implemented.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NullEstimator;
 
 impl Estimator for NullEstimator {
-    fn estimate(
-        &mut self,
-        _io: &mut dyn CalibrationIo,
-        _frame: &CoordinateFrame,
-    ) -> Result<ProbabilisticPosition, EstimateError> {
+     fn estimate(
+         &mut self,
+         _io: &mut dyn CaptureIo,
+         _frame: &CoordinateFrame,
+     ) -> Result<ProbabilisticPosition, EstimateError> {
         Err(EstimateError::NotImplementedYet {
             note: "L1/L8/EKF steady-state tracking is the P2 roadmap item",
         })

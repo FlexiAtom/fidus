@@ -9,6 +9,10 @@
 //! It never binds any protocol that reports window geometry — there is no
 //! native-coordinate facade here, matching the zero-trust rule (spec §1/§2).
 //! The connection is independent of any toolkit the host application uses.
+//!
+//! Two session flavors exist: full calibration sessions ([`IoFactory::open`],
+//! capture + projection) and capture-only sessions ([`IoFactory::open_capture`],
+//! no overlay surface is ever created — the steady-state estimator path).
 
 #![warn(missing_docs)]
 
@@ -17,19 +21,21 @@ mod marker;
 mod session;
 mod shm;
 
-use fidus_core::env::{EnvironmentContext, PermissionState};
-use fidus_core::engine::InitError;
-use fidus_core::io::{
-    CalibrationIo, CaptureError, Frame, IoFactory, MarkerError, MarkerStyle,
-};
 use fidus_core::coord::LogicalPoint;
+use fidus_core::engine::InitError;
+use fidus_core::env::{EnvironmentContext, PermissionState};
+use fidus_core::io::{
+    CalibrationIo, CaptureError, CaptureIo, Frame, IoFactory, MarkerError, MarkerStyle,
+};
 
 use session::Loop;
 
 /// The connected backend. One instance owns one Wayland connection; sessions
-/// ([`CalibrationIo`]) borrow it for their lifetime.
+/// ([`CalibrationIo`] / [`CaptureIo`]) borrow it for their lifetime. The
+/// screencopy buffer is allocated once and reused across sessions.
 pub struct WaylandLayerBackend {
     l: Loop,
+    copy_cache: Option<capture::CopyBuffer>,
 }
 
 impl WaylandLayerBackend {
@@ -46,7 +52,7 @@ impl WaylandLayerBackend {
             .map_err(|e| BackendError::Protocol(e.to_string()))?;
         eq.roundtrip(&mut st)
             .map_err(|e| BackendError::Protocol(e.to_string()))?;
-        Ok(WaylandLayerBackend { l: Loop { conn, eq, st } })
+        Ok(WaylandLayerBackend { l: Loop { conn, eq, st }, copy_cache: None })
     }
 
     /// Whether the compositor exposes all primitives this backend needs.
@@ -78,8 +84,7 @@ impl WaylandLayerBackend {
 
     /// Captures the primary output once (diagnostics / backend smoke tests).
     pub fn capture_once(&mut self) -> Result<Frame, CaptureError> {
-        let mut cache = None;
-        capture::capture(&mut self.l, &mut cache)
+        capture::capture(&mut self.l, &mut self.copy_cache)
     }
 }
 
@@ -133,13 +138,13 @@ impl From<BackendError> for MarkerError {
     }
 }
 
-/// One live calibration session: holds the overlay surface and the capture
-/// buffer cache. Destroying the session drops the projector as well, so the
-/// spec §4.4 teardown rule holds even on early returns.
+/// One live calibration session: holds the overlay surface and borrows the
+/// backend's capture buffer. Destroying the session drops the projector as
+/// well, so the spec §4.4 teardown rule holds even on early returns.
 pub struct BackendSession<'a> {
     l: &'a mut Loop,
+    cache: &'a mut Option<capture::CopyBuffer>,
     projector: Option<marker::Projector>,
-    copy_cache: Option<capture::CopyBuffer>,
     hint: (f64, f64),
 }
 
@@ -152,17 +157,19 @@ impl<'a> BackendSession<'a> {
                 "compositor lacks compositor/shm/layer-shell/screencopy or has no output".into(),
             ));
         }
-        let (projector, hint) =
-            marker::open(&mut backend.l).map_err(InitError::from_marker)?;
-        Ok(BackendSession { l: &mut backend.l, projector: Some(projector), copy_cache: None, hint })
+        let WaylandLayerBackend { l, copy_cache } = backend;
+        let (projector, hint) = marker::open(l).map_err(marker_err)?;
+        Ok(BackendSession { l, cache: copy_cache, projector: Some(projector), hint })
+    }
+}
+
+impl CaptureIo for BackendSession<'_> {
+    fn capture(&mut self) -> Result<Frame, CaptureError> {
+        capture::capture(self.l, self.cache)
     }
 }
 
 impl CalibrationIo for BackendSession<'_> {
-    fn capture(&mut self) -> Result<Frame, CaptureError> {
-        capture::capture(self.l, &mut self.copy_cache)
-    }
-
     fn usable_size_hint(&mut self) -> Result<(f64, f64), MarkerError> {
         Ok(self.hint)
     }
@@ -202,18 +209,35 @@ impl Drop for BackendSession<'_> {
     }
 }
 
+/// Capture-only session for steady-state estimation: no overlay surface, no
+/// projector, no layer-shell interaction at all.
+pub struct CaptureSession<'a> {
+    l: &'a mut Loop,
+    cache: &'a mut Option<capture::CopyBuffer>,
+}
+
+impl CaptureIo for CaptureSession<'_> {
+    fn capture(&mut self) -> Result<Frame, CaptureError> {
+        capture::capture(self.l, self.cache)
+    }
+}
+
 impl IoFactory for WaylandLayerBackend {
     fn open(&mut self) -> Result<Box<dyn CalibrationIo + '_>, InitError> {
         Ok(Box::new(BackendSession::open(self)?))
     }
-}
 
-trait InitErrorFromMarker {
-    fn from_marker(e: MarkerError) -> InitError;
-}
-
-impl InitErrorFromMarker for InitError {
-    fn from_marker(e: MarkerError) -> InitError {
-        InitError::Backend(e.to_string())
+    fn open_capture(&mut self) -> Result<Box<dyn CaptureIo + '_>, InitError> {
+        if !self.primitives_available() {
+            return Err(InitError::ProbeFailed(
+                "compositor lacks screencopy or has no output".into(),
+            ));
+        }
+        let WaylandLayerBackend { l, copy_cache } = self;
+        Ok(Box::new(CaptureSession { l, cache: copy_cache }))
     }
+}
+
+fn marker_err(e: MarkerError) -> InitError {
+    InitError::Backend(e.to_string())
 }

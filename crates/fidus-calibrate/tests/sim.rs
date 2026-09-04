@@ -200,13 +200,15 @@ impl FakeIo {
     }
 }
 
-impl CalibrationIo for FakeIo {
+impl fidus_core::io::CaptureIo for FakeIo {
     fn capture(&mut self) -> Result<Frame, CaptureError> {
         self.step += 1;
         let marker = if self.blind { None } else { self.marker.map(|p| (p, self.style)) };
         Ok(render(&self.screen, marker, &self.patches_for_step(), &[]))
     }
+}
 
+impl CalibrationIo for FakeIo {
     fn usable_size_hint(&mut self) -> Result<(f64, f64), MarkerError> {
         Ok(self.screen.usable())
     }
