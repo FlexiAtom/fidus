@@ -144,11 +144,6 @@ impl CrosshairCalibrator {
             rng.next_u64();
             let map = self.calibrate_pass(io, &mut rng_pass, uw, uh)?;
             // TEMP DIAGNOSTIC (remove once P1 lands): per-pass solved map.
-            eprintln!(
-                "[pass {i}] a={:.5} b={:.5} c={:.2} d={:.5} e={:.5} f={:.2} scale={:.4}",
-                map.0.a, map.0.b, map.0.c, map.0.d, map.0.e, map.0.f,
-                map.0.linear_scale()
-            );
             pass_maps.push(map.0);
             last_quality = Some((map.1, map.2));
         }
