@@ -1,0 +1,15 @@
+[package]
+name = "fidus-calibrate"
+description = "fidus B-layer calibrators: L9 Crosshair (layer-shell), L0 Anchor (planned), L10 GradientField (feature-gated)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+# L10 GradientField stays a research item (spec §4.2) and must be opted into.
+gradient-field = []
+
+[dependencies]
+fidus-core = { workspace = true }
+thiserror = { workspace = true }

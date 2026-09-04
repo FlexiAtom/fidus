@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/fidus-core",
+    "crates/fidus-backend-wayland-layer",
+    "crates/fidus-calibrate",
+    "crates/fidus-estimate",
+    "crates/fidus",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+fidus-core = { path = "crates/fidus-core" }
+fidus-backend-wayland-layer = { path = "crates/fidus-backend-wayland-layer" }
+fidus-calibrate = { path = "crates/fidus-calibrate" }
+fidus-estimate = { path = "crates/fidus-estimate" }
+thiserror = "2"
+
+[profile.release]
+debug = true

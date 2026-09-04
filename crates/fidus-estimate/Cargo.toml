@@ -1,0 +1,10 @@
+[package]
+name = "fidus-estimate"
+description = "fidus C-layer estimators: L1/L6 visual fingerprinting, L8 EdgeSync, L4 motion model, fused by an EKF (P2 roadmap)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+fidus-core = { workspace = true }

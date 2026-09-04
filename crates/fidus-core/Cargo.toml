@@ -1,0 +1,10 @@
+[package]
+name = "fidus-core"
+description = "Zero-Trust Coordinate core: types, traits and purity rules for the fidus positioning engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }

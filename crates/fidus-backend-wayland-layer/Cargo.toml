@@ -1,0 +1,15 @@
+[package]
+name = "fidus-backend-wayland-layer"
+description = "fidus backend: bare wl_surface + layer-shell projection and wlr-screencopy capture (basic compositor primitives only)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+fidus-core = { workspace = true }
+wayland-client = "0.31"
+wayland-backend = "0.3"
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+libc = "0.2"
+thiserror = { workspace = true }

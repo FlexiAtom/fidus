@@ -1,0 +1,18 @@
+[package]
+name = "fidus"
+description = "fidus — Zero-Trust Coordinate positioning engine (umbrella crate with backend selection)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+default = ["wayland-layer"]
+# Adapts bare wl_surface/layer-shell projection + wlr-screencopy capture.
+wayland-layer = ["dep:fidus-backend-wayland-layer"]
+
+[dependencies]
+fidus-core = { workspace = true }
+fidus-calibrate = { workspace = true }
+fidus-estimate = { workspace = true }
+fidus-backend-wayland-layer = { workspace = true, optional = true }
