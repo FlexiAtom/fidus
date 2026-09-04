@@ -13,7 +13,7 @@ impl Rng {
     pub fn seed_from(seed: u64) -> Self {
         let mut s = seed ^ 0x9E37_79B9_7F4A_7C15;
         if s == 0 {
-            s = 0xF1D0_5F1D0_5F1D05;
+            s = 0xF1D0_5F1D_05F1_D005;
         }
         Rng { state: s }
     }

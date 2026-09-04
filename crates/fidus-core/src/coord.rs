@@ -258,8 +258,9 @@ fn solve3(m: [[f64; 3]; 3], rhs: [f64; 3]) -> Option<[f64; 3]> {
                 continue;
             }
             let factor = a[r][col] / a[col][col];
+            let pivot_row = a[col];
             for c in col..3 {
-                a[r][c] -= factor * a[col][c];
+                a[r][c] -= factor * pivot_row[c];
             }
             b[r] -= factor * b[col];
         }

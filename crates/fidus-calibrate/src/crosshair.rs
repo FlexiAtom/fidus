@@ -134,7 +134,7 @@ impl CrosshairCalibrator {
         let mut pass_maps: Vec<AffineTransform> = Vec::with_capacity(cfg.passes);
         let mut last_quality: Option<(CalibrationQuality, (u32, u32))> = None;
 
-        for i in 0..cfg.passes {
+        for _ in 0..cfg.passes {
             let mut rng_pass = rng.clone();
             // Bug fix: advance the *shared* generator, not the throwaway
             // clone. The old `rng_pass.next_u64()` stepped a copy that dies
@@ -143,7 +143,6 @@ impl CrosshairCalibrator {
             // passes" were not independent.
             rng.next_u64();
             let map = self.calibrate_pass(io, &mut rng_pass, uw, uh)?;
-            // TEMP DIAGNOSTIC (remove once P1 lands): per-pass solved map.
             pass_maps.push(map.0);
             last_quality = Some((map.1, map.2));
         }
@@ -346,7 +345,7 @@ fn sample_positions(rng: &mut Rng, cfg: &CrosshairConfig, uw: f64, uh: f64) -> V
     corners.truncate(cfg.primary_positions.max(1));
 
     let mut verify = Vec::with_capacity(cfg.verification_positions);
-    for k in 0..cfg.verification_positions.max(0) {
+    for k in 0..cfg.verification_positions {
         let fx = (k as f64 + 0.5) / cfg.verification_positions as f64;
         verify.push(LogicalPoint::new(
             uw * (0.25 + 0.5 * ((fx * 7.0).fract())),

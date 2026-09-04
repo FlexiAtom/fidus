@@ -66,7 +66,6 @@ pub(crate) struct ShmPool {
     pub pool: wl_shm_pool::WlShmPool,
     pub mmap: Mmap,
     _file: File,
-    pub byte_size: usize,
 }
 
 impl ShmPool {
@@ -93,7 +92,7 @@ impl ShmPool {
             .map_err(|e| BackendError::Io(e.to_string()))?;
         let mmap = Mmap::map(&file, byte_size)?;
         let pool = shm.create_pool(pool_fd.as_fd(), byte_size as i32, qh, ());
-        Ok(ShmPool { pool, mmap, _file: file, byte_size })
+        Ok(ShmPool { pool, mmap, _file: file })
     }
 
     /// Destroys the protocol pool object (the mapping and memfd die with the

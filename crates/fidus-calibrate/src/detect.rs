@@ -181,7 +181,7 @@ pub fn detect_single_change(
         0 => Err(DetectError::AreaMismatch),
         // Without an area prior the marker is the largest coherent change.
         _ if expected_area.is_none() => {
-            candidates.sort_by(|a, b| b.area.cmp(&a.area));
+            candidates.sort_by_key(|c| core::cmp::Reverse(c.area));
             Ok(candidates.remove(0))
         }
         1 => Ok(candidates.remove(0)),

@@ -22,22 +22,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1;
 use wayland_protocols_wlr::screencopy::v1::client::zwlr_screencopy_frame_v1;
 use wayland_protocols_wlr::screencopy::v1::client::zwlr_screencopy_manager_v1;
 
-/// Backend-level errors (pre-`InitError` conversion).
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum BackendError {
-    #[error("failed to connect to Wayland display: {0}")]
-    Connect(String),
-    #[error("required global {0:?} is missing")]
-    MissingGlobal(&'static str),
-    #[error("protocol error: {0}")]
-    Protocol(String),
-    #[error("overlay surface was closed by the compositor")]
-    Closed,
-    #[error("timed out waiting for a compositor event")]
-    Timeout,
-    #[error("i/o error: {0}")]
-    Io(String),
-}
+use crate::BackendError;
 
 /// All protocol state for one backend connection.
 pub(crate) struct Session {
@@ -118,13 +103,6 @@ pub(crate) struct Loop {
 }
 
 impl Loop {
-    pub(crate) fn roundtrip(&mut self) -> Result<(), BackendError> {
-        self.eq
-            .roundtrip(&mut self.st)
-            .map(|_| ())
-            .map_err(|e| BackendError::Protocol(e.to_string()))
-    }
-
     /// Dispatches until `cond(&state)` holds or `timeout` elapses.
     pub(crate) fn wait_for<F>(&mut self, timeout: Duration, mut cond: F) -> Result<(), BackendError>
     where

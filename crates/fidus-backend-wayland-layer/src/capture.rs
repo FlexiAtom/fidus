@@ -89,7 +89,7 @@ pub(crate) fn capture(l: &mut Loop, cache: &mut Option<CopyBuffer>) -> Result<Fr
     let src = cached.shm_pool.mmap.as_slice().to_vec();
     frame.destroy();
     let data = if l.st.cp_y_invert {
-        flip_rows(&src, width, stride)
+        flip_rows(&src, height, stride)
     } else {
         src
     };
@@ -115,5 +115,30 @@ fn shm_format_of(format: PixelFormat) -> wl_shm::Format {
         PixelFormat::Xrgb8888 => wl_shm::Format::Xrgb8888,
         PixelFormat::Abgr8888 => wl_shm::Format::Abgr8888,
         PixelFormat::Xbgr8888 => wl_shm::Format::Xbgr8888,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::flip_rows;
+
+    #[test]
+    fn flip_rows_reverses_row_order() {
+        // 3 rows of 4 bytes.
+        let src: Vec<u8> = (0..3usize)
+            .flat_map(|row| (0..4usize).map(move |i| (row * 10 + i) as u8))
+            .collect();
+        let flipped = flip_rows(&src, 3, 4);
+        assert_eq!(&flipped[0..4], &src[8..12], "top row becomes the old bottom row");
+        assert_eq!(&flipped[8..12], &src[0..4]);
+        assert_eq!(flipped.len(), src.len());
+    }
+
+    #[test]
+    #[should_panic]
+    fn flip_rows_rejects_height_beyond_buffer() {
+        // Regression guard: the call site must pass the *row count*, not the
+        // width — a width/height swap panics here instead of corrupting data.
+        flip_rows(&[0u8; 4 * 3], 4, 4);
     }
 }

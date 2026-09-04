@@ -50,11 +50,10 @@
 
 pub use fidus_core::engine::InitError;
 
-/// Backend selection.
+/// Backend selection: the layer-shell backend, serving wlroots-like
+/// compositors (Niri / Sway / Hyprland), KDE Plasma, and partial GNOME.
 #[cfg(feature = "wayland-layer")]
 pub mod wayland {
-    //! The layer-shell backend (wlroots-like compositors, KDE, partial GNOME).
-
     pub use fidus_backend_wayland_layer::WaylandLayerBackend;
 }
 
