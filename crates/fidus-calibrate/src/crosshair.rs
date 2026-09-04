@@ -214,7 +214,7 @@ impl CrosshairCalibrator {
                 expected_area = Some(detection.area as f64);
             }
             capture_size = detection.capture_size;
-            correspondences.push((center, PhysicalPoint::new(detection.centroid.0, detection.centroid.1)));
+            correspondences.push((center, detection.center));
         }
 
         let (map, residuals) = AffineTransform::from_correspondences(&correspondences)?;
@@ -241,16 +241,7 @@ impl CrosshairCalibrator {
             let predicted = map.apply(center);
             let detection = self.measure(io, *top_left, expected_area, rng)?;
             capture_size = detection.capture_size;
-            let detected = PhysicalPoint::new(detection.centroid.0, detection.centroid.1);
-            // TEMP DIAGNOSTIC (remove once P1 lands): per-measurement
-            // prediction error — the raw noise the fit and the consistency
-            // check are made of.
-            eprintln!(
-                "[verify] logical=({:.0},{:.0}) predicted=({:.2},{:.2}) detected=({:.2},{:.2}) err={:.2}px",
-                top_left.x, top_left.y, predicted.x, predicted.y, detected.x, detected.y,
-                predicted.distance(detected)
-            );
-            verify_max = verify_max.max(predicted.distance(detected));
+            verify_max = verify_max.max(predicted.distance(detection.center));
         }
         if verify_max > cfg.verification_tolerance_px {
             return Err(CalibrationError::AccuracyBelowThreshold {
@@ -291,34 +282,8 @@ impl CrosshairCalibrator {
 
             match detect_single_change(&baseline, &post, expected_area, &self.detect) {
                 Ok(d) => {
-                    // TEMP DIAGNOSTIC (remove once P1 lands): area and mean
-                    // color of the detected region. At scale 1 a clean 28×28
-                    // marker reads area ≈ 784, mean ≈ #ff00ff. Smaller or
-                    // run-to-run variable areas mean threshold clipping or
-                    // the cursor punching holes through the marker.
-                    let (mut sr, mut sg, mut sb, mut n) = (0u64, 0u64, 0u64, 0u64);
-                    for y in d.bbox.y0.max(0)..d.bbox.y1.min(post.height as i64) {
-                        for x in d.bbox.x0.max(0)..d.bbox.x1.min(post.width as i64) {
-                            let [r, g, b, _] = post.rgba_at(x as u32, y as u32);
-                            sr += r as u64;
-                            sg += g as u64;
-                            sb += b as u64;
-                            n += 1;
-                        }
-                    }
-                    eprintln!(
-                        "[meas] logical=({:.0},{:.0}) centroid=({:.2},{:.2}) area={} mean=#{:02x}{:02x}{:02x}",
-                        top_left.x,
-                        top_left.y,
-                        d.centroid.0,
-                        d.centroid.1,
-                        d.area,
-                        (sr / n.max(1)) as u8,
-                        (sg / n.max(1)) as u8,
-                        (sb / n.max(1)) as u8
-                    );
                     return Ok(Measurement {
-                        centroid: d.centroid,
+                        center: d.bbox.center(),
                         area: d.area,
                         capture_size: (post.width, post.height),
                     })
@@ -345,7 +310,14 @@ fn detection_failed(attempts: usize, at: LogicalPoint, cause: Option<DetectError
 
 /// One successful measurement.
 struct Measurement {
-    centroid: (f64, f64),
+    /// Correspondence point: geometric center of the marker's bounding box
+    /// (x1 exclusive), in capture pixels. For the solid square this is the
+    /// exact center of the projected rectangle — the connected-component
+    /// centroid averages *pixel indices*, which sit half a pixel below the
+    /// geometric convention (pixel k spans [k, k+1)), producing the
+    /// constant −0.5 px bias previously absorbed into c/f. The box center
+    /// is also insensitive to holes inside the blob.
+    center: PhysicalPoint,
     area: u32,
     capture_size: (u32, u32),
 }
