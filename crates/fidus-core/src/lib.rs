@@ -54,6 +54,7 @@ pub mod estimate;
 pub mod frame;
 pub mod gate;
 pub mod io;
+pub mod target;
 
 /// Convenient re-exports of the primary public items.
 pub mod prelude {
@@ -68,4 +69,5 @@ pub mod prelude {
         CalibrationIo, CaptureError, CaptureIo, Frame, IoFactory, MarkerError, MarkerShape, MarkerStyle,
         PixelFormat,
     };
+    pub use crate::target::{RgbaImage, TargetDescription};
 }

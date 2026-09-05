@@ -14,10 +14,10 @@ fidus 是一个纯 Rust 定位库：在平台窗口坐标 API 不可信的环境
 |---|---|---|
 | **P0** | 架构地基：类型系统、三层 trait、Gate、概率池纯净性 | ✅ 完成 |
 | **P1** | L9 Crosshair 校准器 + teardown 生命周期 | ✅ 完成，Niri 实机验证通过 |
-| **P2** | L0 Anchor（X11/Windows 兜底）+ C 层 L1/L8 增量追踪 + EKF | ⬜ 计划中 |
+| **P2** | C 层增量追踪：L1 Fingerprint + 运行时 target 注册 ✅（P2-a）→ L8 EdgeSync（P2-b 进行中）→ L4/L7 EKF 融合（P2-c）→ L0 Anchor（P2-d） | 🔶 进行中 |
 | **P3** | L10 GradientField（feature-gated 实验项） | ⬜ 研究项，未实现 |
 
-当前可在 **Niri / Sway / Hyprland / KDE Plasma** 等支持 `zwlr_layer_shell_v1` + `zwlr_screencopy_manager_v1` 的 Wayland 合成器上完成校准。X11、Windows、macOS、GNOME（portal 路径）的 backend 尚未实现。
+当前可在 Niri / Sway / Hyprland / KDE Plasma 等支持 `zwlr_layer_shell_v1` + `zwlr_screencopy_manager_v1` 的 Wayland 合成器上完成校准，并可注册调用方自己的渲染模板做 L1 Fingerprint 稳态追踪（P2-a）。X11、Windows、macOS、GNOME（portal 路径）的 backend 尚未实现。
 
 ## 五条设计原则（附录 A，一切功能的优先级高于功能本身）
 
@@ -39,7 +39,7 @@ crates/
 │                                  engine.rs     Calibrator/Estimator trait + FallbackEngine
 ├── fidus-backend-wayland-layer/ 仅适配基础原语：layer-shell 投影 + wlr-screencopy 截屏
 ├── fidus-calibrate/             L9 Crosshair 校准器（L0/L10 占位）
-├── fidus-estimate/              C 层估计器骨架（P2）
+├── fidus-estimate/              C 层估计器：L1 Fingerprint（P2-a）+ L8 EdgeSync 原语（P2-b）+ L4/L7 融合（P2-c）
 └── fidus/                       伞 crate：FidusBuilder 后端选择 + 冒烟测试二进制
 ```
 
@@ -93,14 +93,21 @@ let frame = engine.calibrate()?;
 println!("scale {:.3}, rms {:.3}px",
     frame.map().linear_scale(), frame.quality().rms_residual_px);
 
-// 3. 稳态追踪（P2）；当前诚实返回 NotImplemented
+// 3. 注册追踪目标：调用方自己的离屏渲染（纯像素，fidus 不收任何平台坐标）
+let target = TargetDescription {
+    template_logical: RgbaImage::from_raw(4, 4, vec![0; 4 * 4 * 4]),
+    initial_center: None,
+};
+engine.register_target(target).expect("estimator accepts targets");
+
+// 4. 稳态追踪（L1 Fingerprint，P2-a）
 let _ = engine.estimate();
 ```
 
 ## 测试
 
 ```bash
-cargo test     # 26 个测试：数学、Gate、检测器、端到端仿真
+cargo test     # 44 个测试：数学、Gate、检测器、端到端仿真、L1/L8 估计器
 cargo clippy   # 零警告
 ```
 
@@ -109,7 +116,7 @@ cargo clippy   # 零警告
 ## 已知限制（对应规格 §10 开放问题）
 
 - **单输出**：多显示器时 Gate 返回 `Degraded`，只校准第一个输出（§10.4 未定案前的诚实降级）。
-- **动态壁纸探测**：`EnvironmentContext.is_dynamic_wallpaper` 目前只能由调用方提供，库内未实现 `ScreenClassifier`（P2 随 L8 落地）。
+- 动态壁纸探测：`EnvironmentContext.is_dynamic_wallpaper` 目前只能由调用方提供，库内未实现 ScreenClassifier；L8 的 MotionGate 输入门控已落地（P2-b），自动探测仍待实现。
 - **L0 Anchor / L10 GradientField**：Gate 诚实返回 `NotImplementedYet` / `FeatureDisabled`。
 - **GNOME（无 layer-shell）**：需要 `fidus-backend-wayland-portal`，未实现。
 - **Y_INVERT**：screencopy 的 Y 反转已处理并有单测，但仅在实机（Niri 不置位该标志）验证过非反转路径。

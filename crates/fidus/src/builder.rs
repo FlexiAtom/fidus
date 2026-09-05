@@ -6,7 +6,7 @@ use fidus_core::engine::{EngineParts, FallbackEngine, InitError};
 use fidus_core::env::EnvironmentContext;
 use fidus_core::gate::ProbeGate;
 use fidus_core::io::IoFactory;
-use fidus_estimate::NullEstimator;
+use fidus_estimate::FingerprintEstimator;
 
 /// Which backend to assemble.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -93,7 +93,7 @@ impl FidusBuilder {
         Ok(FallbackEngine::new(EngineParts {
             gate: Box::new(gate),
             calibrator,
-            estimator: Box::new(NullEstimator),
+            estimator: Box::new(FingerprintEstimator::new()),
             io_factory: Box::new(backend) as Box<dyn IoFactory>,
         }))
     }

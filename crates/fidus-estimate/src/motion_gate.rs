@@ -36,8 +36,17 @@ pub struct MotionGate {
     /// Consecutive passes required to resume after a dynamic episode
     /// (spec: 2).
     pub resume_passes: u32,
-    /// Learned static-change-rate baseline (EMA of passing ratios).
+    /// Learned static-change-rate baseline: an asymmetric EMA over **all**
+    /// observations — slow up (`learn_up`), fast down (`learn_down`). Slow
+    /// upward learning lets a persistently noisy-but-static region (steady
+    /// R above the 15% floor) eventually be absorbed instead of deadlocking
+    /// the gate; fast downward learning re-tightens the gate as soon as
+    /// content calms down.
     baseline: f64,
+    /// Upward baseline learning rate per observation.
+    learn_up: f64,
+    /// Downward baseline learning rate per observation.
+    learn_down: f64,
     static_streak: u32,
     armed: bool,
     last_reference: Option<Instant>,
@@ -51,6 +60,10 @@ impl Default for MotionGate {
             absolute_threshold: 0.15,
             resume_passes: 2,
             baseline: 0.0,
+            // ~20 windows to absorb a steady rate stuck above the 15%
+            // floor; a handful of windows to re-tighten afterwards.
+            learn_up: 0.02,
+            learn_down: 0.5,
             static_streak: 0,
             armed: true,
             last_reference: None,
@@ -77,12 +90,24 @@ impl MotionGate {
         if ratio > threshold {
             self.static_streak = 0;
             self.armed = false;
+            // A DYNAMIC frame still teaches the baseline, very slowly: a
+            // change rate stuck above the 15% floor forever is "noisy
+            // static", not animation, and must eventually be absorbed —
+            // otherwise the gate could never recover. Genuine animation is
+            // absorbed too, but only after ~20 windows of an *unchanged*
+            // rate, and nothing is emitted in the meantime (the 2-pass
+            // resume rule still applies).
+            self.baseline += (ratio - self.baseline) * self.learn_up;
             return GateVerdict { changed_ratio: ratio, passed: false, dynamic: true };
         }
 
         self.static_streak = self.static_streak.saturating_add(1);
-        // Learn the static baseline from passing frames (slow EMA).
-        self.baseline = self.baseline * 0.8 + ratio * 0.2;
+        // Learn the static baseline: fast down, slow up.
+        if ratio > self.baseline {
+            self.baseline += (ratio - self.baseline) * self.learn_up;
+        } else {
+            self.baseline += (ratio - self.baseline) * self.learn_down;
+        }
         let passed = self.static_streak >= self.resume_passes;
         if passed {
             self.armed = true;

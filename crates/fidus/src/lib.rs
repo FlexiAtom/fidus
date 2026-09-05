@@ -32,7 +32,15 @@
 //!     frame.quality().rms_residual_px
 //! );
 //!
-//! // 3. Steady-state tracking (P2 roadmap; currently reports NotImplemented).
+//! // 3. Register what to track: the caller's own offscreen render
+//! //    (pure pixels — fidus never accepts a platform coordinate).
+//! let target = TargetDescription {
+//!     template_logical: RgbaImage::from_raw(4, 4, vec![0; 4 * 4 * 4]),
+//!     initial_center: None,
+//! };
+//! engine.register_target(target).expect("estimator accepts targets");
+//!
+//! // 4. Steady-state tracking (L1 Fingerprint, wired in P2-a).
 //! let _ = engine.estimate();
 //! # Ok(())
 //! # }

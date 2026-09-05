@@ -1,8 +1,17 @@
-//! Minimal tightly-packed RGBA image with the transforms fidus needs.
+//! The tracking-target contract (C layer, spec §3.2 / §6.1).
+//!
+//! The caller tells fidus *what* to locate by handing over its own offscreen
+//! render. Both types are pure visual inputs: nothing here reads or wraps a
+//! platform coordinate, so runtime target registration cannot violate the
+//! zero-trust rule.
 
-use fidus_core::io::Frame;
+use crate::coord::LogicalPoint;
+use crate::io::Frame;
 
 /// A tightly-packed 8-bit RGBA image, row-major, 4 bytes per pixel.
+///
+/// Used for the caller's target render (and reusable wherever fidus needs a
+/// plain pixel buffer outside the capture [`Frame`] strides).
 #[derive(Clone, Debug, PartialEq)]
 pub struct RgbaImage {
     /// Width in pixels.
@@ -80,4 +89,24 @@ impl RgbaImage {
         }
         RgbaImage { width: new_width, height: new_height, data: out }
     }
+}
+
+/// What the estimator should track.
+///
+/// The template is the caller's **own offscreen render** of the target — a
+/// pure visual input, exactly the kind of measurement the probability pool
+/// accepts (spec §6.1). Nothing here reads or wraps a platform coordinate.
+#[derive(Clone, Debug)]
+pub struct TargetDescription {
+    /// Target appearance in **logical pixels** (the caller renders its window
+    /// at logical size; the estimator resamples to the capture scale using
+    /// the calibrated frame).
+    pub template_logical: RgbaImage,
+    /// Where the caller believes it placed the target (center, logical
+    /// coordinates of the calibrated frame). `None` means "search the whole
+    /// screen on the first estimate".
+    ///
+    /// This is the caller's own belief about its own drawing — it is not, and
+    /// cannot be, a value read from a platform window API.
+    pub initial_center: Option<LogicalPoint>,
 }

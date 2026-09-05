@@ -60,4 +60,10 @@ pub enum EstimateError {
     /// Capturing the screen for a fresh measurement failed.
     #[error(transparent)]
     Capture(#[from] CaptureError),
+    /// The target could not be located and no prior position exists to
+    /// report (first search failed). Honesty rule: the pool is never fed a
+    /// fabricated position (spec §4.5).
+    #[error("tracking target not found in capture")]
+    TargetLost,
 }
+

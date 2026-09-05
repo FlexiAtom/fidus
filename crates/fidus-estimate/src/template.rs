@@ -8,8 +8,7 @@
 
 use fidus_core::coord::PhysicalPoint;
 use fidus_core::io::Frame;
-
-use crate::image::RgbaImage;
+use fidus_core::target::RgbaImage;
 
 /// One successful template match.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -62,7 +61,7 @@ impl SampledTemplate {
 }
 
 /// Computes the tightly-packed luma plane of `frame`.
-fn luma_plane(frame: &Frame) -> (u32, u32, Vec<f32>) {
+pub(crate) fn luma_plane(frame: &Frame) -> (u32, u32, Vec<f32>) {
     let mut p = Vec::with_capacity(frame.width as usize * frame.height as usize);
     for y in 0..frame.height {
         for x in 0..frame.width {
@@ -134,6 +133,18 @@ pub fn match_template(frame: &Frame, template: &RgbaImage, roi: SearchRoi) -> Op
     // Phase 1: coarse scan.
     let step = 3i64;
     let mut best: Option<(i64, i64, f64)> = None;
+    // Always evaluate the caller's expected position exactly. The step-3
+    // lattice is anchored at the window edge, so it skips the ROI center
+    // whenever (center - lo) % step != 0; for sharp content the NCC
+    // landscape is a needle, every lattice point then scores like noise,
+    // and the +-3 refinement lands in an arbitrary neighborhood that may
+    // never reach the true peak. Seeding the scan with the prediction
+    // guarantees the belief is verified at full fidelity.
+    let sx = (roi.center.0.round() as i64).clamp(x_lo, x_hi);
+    let sy = (roi.center.1.round() as i64).clamp(y_lo, y_hi);
+    if let Some(score) = ncc(&plane, &coarse_tpl, sx, sy) {
+        best = Some((sx, sy, score));
+    }
     let mut oy = y_lo;
     while oy <= y_hi {
         let mut ox = x_lo;

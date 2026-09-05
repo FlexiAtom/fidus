@@ -3,6 +3,7 @@
 use crate::calibration::{CalibrationError, CalibrationMethod};
 use crate::env::EnvironmentContext;
 use crate::estimate::{EstimateError, ProbabilisticPosition};
+use crate::target::TargetDescription;
 use crate::frame::CoordinateFrame;
 use crate::gate::Gate;
 use crate::io::{CalibrationIo, CaptureIo, IoFactory};
@@ -38,6 +39,18 @@ pub trait Estimator: Send {
         io: &mut dyn CaptureIo,
         frame: &CoordinateFrame,
     ) -> Result<ProbabilisticPosition, EstimateError>;
+
+    /// Registers the target to track (spec §3.2: the caller describes *what*
+    /// to locate; fidus only ever measures pixels). Replaces any previously
+    /// registered target.
+    ///
+    /// The default implementation refuses: estimators without tracking
+    /// support reject targets honestly instead of silently ignoring them.
+    fn register_target(&mut self, _target: TargetDescription) -> Result<(), EstimateError> {
+        Err(EstimateError::NotImplementedYet {
+            note: "this estimator does not accept tracking targets",
+        })
+    }
 }
 
 /// Backend-level error surfaced when opening sessions or probing.
@@ -144,5 +157,15 @@ impl FallbackEngine {
             EstimateError::Capture(crate::io::CaptureError::Backend(e.to_string()))
         })?;
         self.estimator.estimate(io.as_mut(), frame)
+    }
+
+    /// Registers the target the estimator should track (runtime
+    /// registration; spec §3.2 / §6.1).
+    ///
+    /// Replaces any previously registered target. Returns
+    /// [`EstimateError::NotImplementedYet`] when the assembled estimator
+    /// does not support tracking.
+    pub fn register_target(&mut self, target: TargetDescription) -> Result<(), EstimateError> {
+        self.estimator.register_target(target)
     }
 }

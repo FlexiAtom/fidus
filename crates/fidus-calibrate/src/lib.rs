@@ -16,13 +16,9 @@
 //! involved anywhere.
 
 #![warn(missing_docs)]
-
 pub mod crosshair;
 pub mod detect;
 pub mod rng;
-#[cfg(feature = "gradient-field")]
-pub mod gradient_field;
 
 pub use crosshair::{CrosshairCalibrator, CrosshairConfig};
 pub use detect::{DetectConfig, DetectError, Detection};
-pub use rng::Rng;
