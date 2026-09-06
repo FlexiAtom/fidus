@@ -14,10 +14,10 @@ fidus 是一个纯 Rust 定位库：在平台窗口坐标 API 不可信的环境
 |---|---|---|
 | **P0** | 架构地基：类型系统、三层 trait、Gate、概率池纯净性 | ✅ 完成 |
 | **P1** | L9 Crosshair 校准器 + teardown 生命周期 | ✅ 完成，Niri 实机验证通过 |
-| **P2** | C 层增量追踪：L1 Fingerprint + 运行时 target 注册 ✅（P2-a）→ L8 EdgeSync（P2-b 进行中）→ L4/L7 EKF 融合（P2-c）→ L0 Anchor（P2-d） | 🔶 进行中 |
+| **P2** | C 层增量追踪：L1 Fingerprint + 运行时 target 注册 ✅（P2-a）→ L8 EdgeSync + MotionGate ✅（P2-b）→ L4/L7 融合（常速度 KF）✅（P2-c）→ L0 Anchor（P2-d） | 🔶 进行中 |
 | **P3** | L10 GradientField（feature-gated 实验项） | ⬜ 研究项，未实现 |
 
-当前可在 Niri / Sway / Hyprland / KDE Plasma 等支持 `zwlr_layer_shell_v1` + `zwlr_screencopy_manager_v1` 的 Wayland 合成器上完成校准，并可注册调用方自己的渲染模板做 L1 Fingerprint 稳态追踪（P2-a）。X11、Windows、macOS、GNOME（portal 路径）的 backend 尚未实现。
+当前可在 Niri / Sway / Hyprland / KDE Plasma 等支持 `zwlr_layer_shell_v1` + `zwlr_screencopy_manager_v1` 的 Wayland 合成器上完成校准，并可注册调用方自己的渲染模板做稳态追踪：L1 模板匹配 + L8 门控差分融合进常速度 Kalman 跟踪器（L7，P2-c）——拖拽跟随、动画期滑行（置信度 0 的标注信念而非伪造测量）、丢失后重捕获。X11、Windows、macOS、GNOME（portal 路径）的 backend 尚未实现。
 
 ## 五条设计原则（附录 A，一切功能的优先级高于功能本身）
 
@@ -39,7 +39,7 @@ crates/
 │                                  engine.rs     Calibrator/Estimator trait + FallbackEngine
 ├── fidus-backend-wayland-layer/ 仅适配基础原语：layer-shell 投影 + wlr-screencopy 截屏
 ├── fidus-calibrate/             L9 Crosshair 校准器（L0/L10 占位）
-├── fidus-estimate/              C 层估计器：L1 Fingerprint（P2-a）+ L8 EdgeSync 原语（P2-b）+ L4/L7 融合（P2-c）
+├── fidus-estimate/              C 层估计器：L1 Fingerprint + L8 EdgeSync/MotionGate + L4/L7 融合（常速度 KF）
 └── fidus/                       伞 crate：FidusBuilder 后端选择 + 冒烟测试二进制
 ```
 
@@ -100,14 +100,20 @@ let target = TargetDescription {
 };
 engine.register_target(target).expect("estimator accepts targets");
 
-// 4. 稳态追踪（L1 Fingerprint，P2-a）
+// 4. 稳态追踪（L7 融合：L1 模板匹配 + L8 门控差分 → 常速度 Kalman）
 let _ = engine.estimate();
 ```
+
+## C 层估计管线（P2）
+
+1. **L1 Fingerprint**：调用方模板（逻辑像素渲染）按校准 scale 重采样 → NCC 粗到细扫描（预测位置播种）+ 亚像素峰拟合。
+2. **L8 EdgeSync + MotionGate**：500ms 窗口帧差分；目标区域变化率 R > max(baseline×3, 15%) 即 DYNAMIC 丢弃、连续 2 帧通过才恢复（§6.1）。基线非对称学习（慢升快降）避免稳态噪声卡死门限。有据细化：**已模板验证的位移 blob 即使 R 尖峰也放行**（尖峰由离场解释，到达内容经模板验证——比统计门更强的检查）。
+3. **L7 融合**：L1+L8 测量按置信度融合（互相印证加成）→ 常速度 Kalman（L4 运动模型）。首修/重捕获时**硬重置**（陈旧速度不得抹开跳变）；双盲帧**滑行**——按速度外推、置信度 0，明确标注是信念而非测量（§4.5 池内不进伪造值）。
 
 ## 测试
 
 ```bash
-cargo test     # 44 个测试：数学、Gate、检测器、端到端仿真、L1/L8 估计器
+cargo test     # 48 个测试：数学、Gate、检测器、端到端仿真、L1/L8/L7 估计器
 cargo clippy   # 零警告
 ```
 

@@ -65,8 +65,10 @@ pub struct EdgeSyncObservation {
 /// What one [`EdgeSync::observe`] call concluded.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EdgeSyncOutcome {
-    /// First observation (or the output geometry changed): the reference
-    /// was stored, nothing to compare yet.
+    /// The reference was (re)stored this call and nothing comparable came
+    /// out: first observation, an output geometry change, or a
+    /// below-threshold change from which no target-like candidate
+    /// survived the filters (quiet scene drift absorbed into the anchor).
     NoReference,
     /// Younger than the differ window: reference refreshed, no diff taken.
     YoungReference,
@@ -145,12 +147,17 @@ impl EdgeSync {
                 self.reference = Some(Self::snap(frame, now));
                 return EdgeSyncOutcome::NoReference;
             }
-            // Younger than the window: refresh the reference so the next
-            // diff compares against the freshest static view.
+            // Younger than the window: HOLD the reference. The diff anchor
+            // must stay the frame from ~`window` ago — that is exactly the
+            // spec's 500 ms differencing window (§6.1). Refreshing here
+            // would reset `at` on every fast call (a 30–60 fps tracking
+            // loop), the reference would never mature, and L8 would go
+            // silent forever. The reference is replaced only after a diff
+            // is taken (see below) or on geometry change.
             Some(r) if now.duration_since(r.at) < self.window => {
-                self.reference = Some(Self::snap(frame, now));
                 return EdgeSyncOutcome::YoungReference;
             }
+            // Reference matured: fall through to the diff below.
             Some(_) => {}
         }
 
@@ -185,6 +192,7 @@ impl EdgeSync {
             })
             .map(|b| b.bbox)
             .collect();
+        let had_candidates = !candidates.is_empty();
 
         // Template verification (L1 assist): the arrival blob shows the
         // target's content, the departure blob shows only background.
@@ -245,7 +253,15 @@ impl EdgeSync {
             _ if verdict.dynamic => EdgeSyncOutcome::Blocked { changed_ratio: ratio },
             // Changed content below the dynamic threshold, but nothing
             // target-like: leave the measurement to other layers.
-            _ => EdgeSyncOutcome::Unmatched,
+            _ if !had_candidates => EdgeSyncOutcome::NoReference,
+            // Size-plausible blobs existed but none verified: an
+            // unexplained, target-shaped change — the capture is no
+            // longer a trustworthy diff anchor — drop it; the next
+            // observe re-anchors from scratch.
+            _ => {
+                self.reference = None;
+                EdgeSyncOutcome::Unmatched
+            }
         }
     }
 
@@ -628,8 +644,46 @@ mod tests {
         }
         assert_eq!(
             es.observe(&f, region, roi, &tpl, t0 + Duration::from_millis(600)),
-            EdgeSyncOutcome::Unmatched
+            EdgeSyncOutcome::NoReference
         );
+    }
+
+    #[test]
+    fn fast_call_cadence_still_matures_a_diff() {
+        // Regression: the YoungReference branch used to refresh the anchor
+        // on every call, so a caller looping faster than the 500 ms window
+        // (a normal per-frame tracking loop) never produced a diff. The
+        // anchor must hold until the window matures.
+        let mut es = EdgeSync::new();
+        let region = bbox(200, 150);
+        let roi = expanded(region, 96);
+        let tpl = template(0);
+        let t0 = Instant::now();
+
+        // ~60 fps cadence: every observation is younger than the window…
+        assert_eq!(
+            es.observe(&scene(Some((200, 150)), 0), region, roi, &tpl, t0),
+            EdgeSyncOutcome::NoReference
+        );
+        for k in 1..=31 {
+            let t = t0 + Duration::from_millis(16 * k);
+            assert_eq!(
+                es.observe(&scene(Some((200, 150)), 0), region, roi, &tpl, t),
+                EdgeSyncOutcome::YoungReference,
+                "step {k}"
+            );
+        }
+
+        // …and the first frame past the window must diff against the
+        // anchored reference (496 ms ago), measuring the displacement.
+        let o = es.observe(
+            &scene(Some((280, 220)), 0),
+            region,
+            roi,
+            &tpl,
+            t0 + Duration::from_millis(512),
+        );
+        assert!(matches!(o, EdgeSyncOutcome::Measured(_)), "got {o:?}");
     }
 
     #[test]

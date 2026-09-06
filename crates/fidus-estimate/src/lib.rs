@@ -17,23 +17,66 @@
 //! [`TargetDescription`] — its own offscreen render, a pure visual input.
 //! Nothing here reads or wraps a platform coordinate.
 
-use fidus_core::coord::LogicalPoint;
+use fidus_core::coord::{LogicalPoint, PhysicalPoint};
 use fidus_core::engine::Estimator;
 use fidus_core::estimate::{EstimateError, MeasurementSource, ProbabilisticPosition};
 use fidus_core::frame::CoordinateFrame;
 use fidus_core::io::CaptureIo;
 
 pub mod edge_sync;
+pub mod fused;
+pub mod kalman;
 pub mod motion_gate;
 pub mod template;
 
 pub use fidus_core::target::{RgbaImage, TargetDescription};
+pub use fused::FusedEstimator;
+pub use kalman::VelocityTrack;
 
 /// NCC score below which a match counts as "not found" (the usable floor
 /// for textured templates, per the `template` module notes).
-const MIN_SCORE: f64 = 0.35;
+pub(crate) const MIN_SCORE: f64 = 0.35;
 /// NCC score at which confidence saturates at 1.0.
-const FULL_SCORE: f64 = 0.9;
+pub(crate) const FULL_SCORE: f64 = 0.9;
+
+/// One L1 template match, expressed in both coordinate spaces.
+pub(crate) struct L1Match {
+    /// Matched center in calibrated logical coordinates.
+    pub position_logical: LogicalPoint,
+    /// Matched center in capture pixels.
+    pub center_physical: PhysicalPoint,
+    /// Confidence mapped from the NCC score, in `[0, 1]`.
+    pub confidence: f32,
+    /// The template-sized bbox around the match, in capture pixels.
+    pub bbox_physical: fidus_core::coord::BoundingBox,
+}
+
+/// Runs one L1 template match inside `roi` and maps the result through the
+/// calibrated frame. Shared by the standalone [`FingerprintEstimator`] and
+/// the fused L7 estimator.
+pub(crate) fn l1_match(
+    frame_img: &fidus_core::io::Frame,
+    frame: &CoordinateFrame,
+    tpl: &RgbaImage,
+    roi: template::SearchRoi,
+) -> Option<L1Match> {
+    let m = template::match_template(frame_img, tpl, roi)?;
+    if m.score < MIN_SCORE {
+        return None;
+    }
+    let (tw, th) = (tpl.width as f64, tpl.height as f64);
+    Some(L1Match {
+        position_logical: frame.physical_to_logical(m.center),
+        center_physical: m.center,
+        confidence: ((m.score - MIN_SCORE) / (FULL_SCORE - MIN_SCORE)).clamp(0.0, 1.0) as f32,
+        bbox_physical: fidus_core::coord::BoundingBox {
+            x0: (m.center.x - tw / 2.0).round() as i64,
+            y0: (m.center.y - th / 2.0).round() as i64,
+            x1: (m.center.x + tw / 2.0).round() as i64,
+            y1: (m.center.y + th / 2.0).round() as i64,
+        },
+    })
+}
 
 /// Placeholder estimator: always reports that tracking is not implemented.
 #[derive(Clone, Copy, Debug, Default)]
@@ -85,7 +128,7 @@ impl FingerprintEstimator {
     }
 
     /// The logical-space template resampled to capture-pixel scale.
-    fn template_physical(&self, frame: &CoordinateFrame) -> Option<RgbaImage> {
+    pub(crate) fn template_physical(&self, frame: &CoordinateFrame) -> Option<RgbaImage> {
         let t = self.target.as_ref()?;
         let s = frame.map().linear_scale();
         let (tw, th) = (
@@ -153,24 +196,16 @@ impl Estimator for FingerprintEstimator {
 
         let roi = template::SearchRoi { center: (center.x, center.y), half };
         let source = MeasurementSource::Single("L1 Fingerprint");
-        match template::match_template(&frame_img, &tpl, roi) {
-            Some(m) if m.score >= MIN_SCORE => {
-                let position = frame.physical_to_logical(m.center);
+        match l1_match(&frame_img, frame, &tpl, roi) {
+            Some(m) => {
+                let position = m.position_logical;
                 self.last_logical = Some(position);
                 self.lost_streak = 0;
-                let (tw, th) = (tpl.width as f64, tpl.height as f64);
-                let bbox_physical = fidus_core::coord::BoundingBox {
-                    x0: (m.center.x - tw / 2.0).round() as i64,
-                    y0: (m.center.y - th / 2.0).round() as i64,
-                    x1: (m.center.x + tw / 2.0).round() as i64,
-                    y1: (m.center.y + th / 2.0).round() as i64,
-                };
-                let confidence =
-                    ((m.score - MIN_SCORE) / (FULL_SCORE - MIN_SCORE)).clamp(0.0, 1.0) as f32;
+                let confidence = m.confidence;
                 Ok(ProbabilisticPosition {
                     position,
                     confidence,
-                    bbox_physical: Some(bbox_physical),
+                    bbox_physical: Some(m.bbox_physical),
                     measured_at: std::time::Instant::now(),
                     source,
                 })

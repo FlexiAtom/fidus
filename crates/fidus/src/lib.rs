@@ -73,6 +73,7 @@ pub mod prelude {
     pub use fidus_core::prelude::*;
     pub use fidus_calibrate::CrosshairCalibrator;
     pub use fidus_calibrate::CrosshairConfig;
+    pub use fidus_estimate::{FingerprintEstimator, FusedEstimator};
 }
 
 mod builder;
