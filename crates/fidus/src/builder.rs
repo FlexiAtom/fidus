@@ -6,7 +6,7 @@ use fidus_core::engine::{Calibrator, EngineParts, FallbackEngine, InitError};
 use fidus_core::env::EnvironmentContext;
 use fidus_core::gate::{Gate, ProbeGate};
 use fidus_core::io::IoFactory;
-use fidus_estimate::FusedEstimator;
+use fidus_estimate::{FusedEstimator, ScreenClassifier};
 
 /// Which backend to assemble.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -25,12 +25,27 @@ pub enum BackendChoice {
 
 /// Builder for a [`FallbackEngine`], with caller-supplied environment
 /// knowledge and calibrator tuning.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct FidusBuilder {
     caller_env: EnvironmentContext,
     crosshair: Option<CrosshairConfig>,
     anchor: Option<AnchorConfig>,
     preferred: Option<CalibrationMethod>,
+    /// Automatic dynamic-wallpaper classification at build time (two
+    /// captures ~200 ms apart). `None` disables it.
+    classifier: Option<ScreenClassifier>,
+}
+
+impl Default for FidusBuilder {
+    fn default() -> Self {
+        Self {
+            caller_env: EnvironmentContext::default(),
+            crosshair: None,
+            anchor: None,
+            preferred: None,
+            classifier: Some(ScreenClassifier::default()),
+        }
+    }
 }
 
 impl FidusBuilder {
@@ -40,9 +55,17 @@ impl FidusBuilder {
     }
 
     /// Adds caller knowledge about the environment (e.g. dynamic wallpaper).
-    /// Probe results remain authoritative for capabilities.
+    /// Probe results remain authoritative for capabilities; a caller-supplied
+    /// `is_dynamic_wallpaper` skips the automatic classification.
     pub fn with_environment(mut self, caller: EnvironmentContext) -> Self {
         self.caller_env = caller;
+        self
+    }
+
+    /// Tunes — or with `None` disables — the build-time dynamic-wallpaper
+    /// classification (adds ~200 ms and two captures to `build`).
+    pub fn with_screen_classifier(mut self, classifier: Option<ScreenClassifier>) -> Self {
+        self.classifier = classifier;
         self
     }
 
@@ -149,8 +172,21 @@ impl FidusBuilder {
     }
 
     /// Gate → calibrator selection → engine.
-    fn assemble(self, backend: ProbedBackend) -> Result<FallbackEngine, InitError> {
-        let env = EnvironmentContext::merge(backend.env, self.caller_env);
+    fn assemble(self, mut backend: ProbedBackend) -> Result<FallbackEngine, InitError> {
+        let mut env = EnvironmentContext::merge(backend.env, self.caller_env);
+
+        // Automatic dynamic-wallpaper knowledge (v0.4 L8 ScreenClassifier):
+        // only when nobody knows better, and only if a capture-only session
+        // opens — a failure here is not fatal, the field just stays `None`.
+        if env.is_dynamic_wallpaper.is_none() {
+            if let Some(classifier) = self.classifier {
+                if let Ok(mut io) = backend.io_factory.open_capture() {
+                    if let Ok(v) = classifier.classify_blocking(io.as_mut()) {
+                        env.is_dynamic_wallpaper = Some(v.dynamic);
+                    }
+                }
+            }
+        }
         let gate = ProbeGate::from_environment(env);
 
         // Calibrator selection follows the gate, in preference order. The

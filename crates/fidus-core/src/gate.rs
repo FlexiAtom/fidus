@@ -71,10 +71,17 @@ impl ProbeGate {
                 };
             }
         }
+        // Spec §5.1: "视觉方案遇动态壁纸，置信度下降". L9's baseline
+        // differencing is robust to it (a moving background can only fail a
+        // single measurement, never fake one), so the degradation is mild:
+        // more retries, longer calibration, not lower accuracy.
+        let dynamic = self.env.is_dynamic_wallpaper == Some(true);
         if self.env.multi_monitor_count > 1 {
             // Spec §10 open question 4: multi-monitor CoordinateFrame is not
             // settled; v0.1 calibrates the primary output honestly.
-            CalibrationStatus::Degraded { method, estimated_confidence: 0.75 }
+            CalibrationStatus::Degraded { method, estimated_confidence: if dynamic { 0.65 } else { 0.75 } }
+        } else if dynamic {
+            CalibrationStatus::Degraded { method, estimated_confidence: 0.85 }
         } else {
             CalibrationStatus::Available { method }
         }

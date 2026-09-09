@@ -58,6 +58,20 @@ fn multi_monitor_degrades_but_stays_usable() {
 }
 
 #[test]
+fn dynamic_wallpaper_degrades_crosshair_mildly() {
+    let env = EnvironmentContext { is_dynamic_wallpaper: Some(true), ..niri_env() };
+    let status = ProbeGate::from_environment(env).query_calibrator_availability(CalibrationMethod::Crosshair);
+    assert!(status.is_usable());
+    assert!(matches!(status, CalibrationStatus::Degraded { estimated_confidence, .. } if estimated_confidence >= 0.8));
+    // Unknown wallpaper state is not a degradation.
+    let env = EnvironmentContext { is_dynamic_wallpaper: None, ..niri_env() };
+    assert!(matches!(
+        ProbeGate::from_environment(env).query_calibrator_availability(CalibrationMethod::Crosshair),
+        CalibrationStatus::Available { .. }
+    ));
+}
+
+#[test]
 fn revoked_capture_permission_requires_permission_flow() {
     let env = EnvironmentContext {
         screen_capture_permission: PermissionState::Revoked,

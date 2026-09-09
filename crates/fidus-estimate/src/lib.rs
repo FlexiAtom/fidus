@@ -27,11 +27,13 @@ pub mod edge_sync;
 pub mod fused;
 pub mod kalman;
 pub mod motion_gate;
+pub mod screen_classifier;
 pub mod template;
 
 pub use fidus_core::target::{RgbaImage, TargetDescription};
 pub use fused::FusedEstimator;
 pub use kalman::VelocityTrack;
+pub use screen_classifier::{ScreenClassifier, WallpaperVerdict};
 
 /// NCC score below which a match counts as "not found" (the usable floor
 /// for textured templates, per the `template` module notes).

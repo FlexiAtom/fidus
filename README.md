@@ -42,7 +42,7 @@ crates/
 ├── fidus-backend-wayland-layer/ 仅适配基础原语：layer-shell 投影 + wlr-screencopy 截屏
 ├── fidus-backend-x11/           仅适配基础原语：override-redirect 窗口投影（每标记一窗）+ GetImage(root) 截屏
 ├── fidus-calibrate/             L9 Crosshair + L0 Anchor 校准器；共享 detect.rs 差分检测器（L10 占位）
-├── fidus-estimate/              C 层估计器：L1 Fingerprint + L8 EdgeSync/MotionGate + L4/L7 融合（常速度 KF）
+├── fidus-estimate/              C 层估计器：L1 Fingerprint + L8 EdgeSync/MotionGate + L4/L7 融合（常速度 KF）+ ScreenClassifier
 └── fidus/                       伞 crate：FidusBuilder 后端选择（Auto/WaylandLayer/X11）+ 冒烟测试二进制
 ```
 
@@ -132,7 +132,7 @@ let _ = engine.estimate();
 ## 测试
 
 ```bash
-cargo test     # 58 个测试：数学、Gate、检测器、L9/L0 端到端仿真、L1/L8/L7 估计器
+cargo test     # 66 个测试：数学、Gate、检测器、L9/L0 端到端仿真、L1/L8/L7 估计器
 cargo clippy   # 零警告
 ```
 
@@ -141,7 +141,7 @@ cargo clippy   # 零警告
 ## 已知限制（对应规格 §10 开放问题）
 
 - **单输出**：多显示器时 Gate 返回 `Degraded`，只校准第一个输出（§10.4 未定案前的诚实降级）。
-- 动态壁纸探测：`EnvironmentContext.is_dynamic_wallpaper` 目前只能由调用方提供，库内未实现 ScreenClassifier；L8 的 MotionGate 输入门控已落地（P2-b），自动探测仍待实现。
+- 动态壁纸探测（P2-e 已落地）：`FidusBuilder::build` 默认跑一次 `ScreenClassifier`（3 对相隔 200ms 的截屏、中心 84% 区域、步长 4 采样，取**最差**一对；> 15% 判动态）自动填充 `is_dynamic_wallpaper`，调用方显式提供时跳过；Gate 据此把 L9 降为 `Degraded{0.85}`（差分检测对动态背景鲁棒，代价是重试更多而非精度更低）、L0 降为 `Degraded{0.6}`。实机读数：静态桌面 ~0.0001–0.0005，全屏动画 0.22–0.29，局部动画 0.08–0.17（正是"取最差一对"的理由）。它分不清"壁纸在动"和"窗口里在播视频"——但 Gate 问的是"基线与捕获之间背景会不会变"，两者答案相同，所以不区分。
 - **L0 在 rootless XWayland 上不可用**（见上文）；Windows / macOS 的 window-per-marker 后端未实现——L0 校准器本身已就绪，只差后端。
 - **L10 GradientField**：Gate 诚实返回 `FeatureDisabled`。
 - **GNOME（无 layer-shell）**：需要 `fidus-backend-wayland-portal`，未实现。
