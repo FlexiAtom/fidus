@@ -1,6 +1,6 @@
 [package]
 name = "fidus-calibrate"
-description = "fidus B-layer calibrators: L9 Crosshair (layer-shell), L0 Anchor (planned), L10 GradientField (feature-gated)"
+description = "fidus B-layer calibrators: L9 Crosshair (layer-shell), L0 Anchor (universal fallback), L10 GradientField (feature-gated)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

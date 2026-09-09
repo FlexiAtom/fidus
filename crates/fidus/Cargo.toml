@@ -7,12 +7,15 @@ rust-version.workspace = true
 license.workspace = true
 
 [features]
-default = ["wayland-layer"]
+default = ["wayland-layer", "x11"]
 # Adapts bare wl_surface/layer-shell projection + wlr-screencopy capture.
 wayland-layer = ["dep:fidus-backend-wayland-layer"]
+# Adapts override-redirect window projection + GetImage(root) capture.
+x11 = ["dep:fidus-backend-x11"]
 
 [dependencies]
 fidus-core = { workspace = true }
 fidus-calibrate = { workspace = true }
 fidus-estimate = { workspace = true }
 fidus-backend-wayland-layer = { workspace = true, optional = true }
+fidus-backend-x11 = { workspace = true, optional = true }

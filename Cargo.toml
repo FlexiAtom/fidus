@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/fidus-core",
     "crates/fidus-backend-wayland-layer",
+    "crates/fidus-backend-x11",
     "crates/fidus-calibrate",
     "crates/fidus-estimate",
     "crates/fidus",
@@ -17,6 +18,7 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 fidus-core = { path = "crates/fidus-core" }
 fidus-backend-wayland-layer = { path = "crates/fidus-backend-wayland-layer" }
+fidus-backend-x11 = { path = "crates/fidus-backend-x11" }
 fidus-calibrate = { path = "crates/fidus-calibrate" }
 fidus-estimate = { path = "crates/fidus-estimate" }
 thiserror = "2"

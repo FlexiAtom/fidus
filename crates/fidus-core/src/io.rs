@@ -156,6 +156,10 @@ pub enum MarkerError {
     /// The projector was already destroyed (teardown is idempotent).
     #[error("projector already destroyed")]
     AlreadyDestroyed,
+    /// This backend cannot project several markers at once (single-surface
+    /// compositors). L0 Anchor needs multi-marker projection; L9 does not.
+    #[error("backend cannot project multiple markers simultaneously")]
+    MultiMarkersUnsupported,
 }
 
 /// Capture-only sessions: the single primitive steady-state estimation
@@ -190,6 +194,24 @@ pub trait CalibrationIo: CaptureIo {
     /// `pos` (usable-area coordinates). Returns after the marker is
     /// guaranteed to be present on screen.
     fn show_marker(&mut self, pos: crate::coord::LogicalPoint, style: MarkerStyle) -> Result<(), MarkerError>;
+
+    /// Projects several markers simultaneously (L0 Anchor's four corner
+    /// sentinels, spec §4.3). Same top-left semantics as
+    /// [`show_marker`](Self::show_marker); replaces any previously projected
+    /// set.
+    ///
+    /// The default refuses, and a backend that keeps the default must report
+    /// `multi_marker_projection: false` in its probed
+    /// [`EnvironmentContext`](crate::env::EnvironmentContext) so the gate
+    /// never offers L0 on it. Single-surface projectors (the layer-shell
+    /// backend) keep the default; window-per-marker backends (X11
+    /// override-redirect windows, and later Windows/macOS) override it.
+    fn show_markers(
+        &mut self,
+        _marks: &[(crate::coord::LogicalPoint, MarkerStyle)],
+    ) -> Result<(), MarkerError> {
+        Err(MarkerError::MultiMarkersUnsupported)
+    }
 
     /// Removes the currently projected marker and waits until the removal is
     /// visible on screen.

@@ -12,8 +12,10 @@ pub enum CalibrationMethod {
     Crosshair,
     /// L10 GradientField — experimental, feature-gated (`gradient-field`).
     GradientField,
-    /// L0 Anchor — universal fallback based on corner markers, for
-    /// environments without layer-shell (X11, Windows).
+    /// L0 Anchor — the universal fallback: four color sentinels projected at
+    /// the corners simultaneously. Needs only the two primitives every
+    /// backend adapts (project, capture) plus multi-marker projection;
+    /// serves environments without layer-shell (X11, Windows, …).
     Anchor,
 }
 
@@ -59,6 +61,12 @@ pub enum UnsupportedReason {
     },
     /// No usable display connection.
     NoDisplay,
+    /// The backend does not provide a primitive the method depends on
+    /// (e.g. simultaneous multi-marker projection for L0 Anchor).
+    MissingPrimitive {
+        /// Human-readable primitive name.
+        primitive: &'static str,
+    },
 }
 
 impl UnsupportedReason {
@@ -76,6 +84,9 @@ impl UnsupportedReason {
                 format!("{outputs} outputs detected, only single-output is supported")
             }
             UnsupportedReason::NoDisplay => "no usable display".to_string(),
+            UnsupportedReason::MissingPrimitive { primitive } => {
+                format!("backend lacks primitive: {primitive}")
+            }
         }
     }
 }

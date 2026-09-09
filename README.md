@@ -14,10 +14,12 @@ fidus 是一个纯 Rust 定位库：在平台窗口坐标 API 不可信的环境
 |---|---|---|
 | **P0** | 架构地基：类型系统、三层 trait、Gate、概率池纯净性 | ✅ 完成 |
 | **P1** | L9 Crosshair 校准器 + teardown 生命周期 | ✅ 完成，Niri 实机验证通过 |
-| **P2** | C 层增量追踪：L1 Fingerprint + 运行时 target 注册 ✅（P2-a）→ L8 EdgeSync + MotionGate ✅（P2-b）→ L4/L7 融合（常速度 KF）✅（P2-c）→ L0 Anchor（P2-d） | 🔶 进行中 |
+| **P2** | C 层增量追踪：L1 Fingerprint + 运行时 target 注册 ✅（P2-a）→ L8 EdgeSync + MotionGate ✅（P2-b）→ L4/L7 融合（常速度 KF）✅（P2-c）→ L0 Anchor 通用兜底校准器 + X11 backend ✅（P2-d） | ✅ 完成 |
 | **P3** | L10 GradientField（feature-gated 实验项） | ⬜ 研究项，未实现 |
 
-当前可在 Niri / Sway / Hyprland / KDE Plasma 等支持 `zwlr_layer_shell_v1` + `zwlr_screencopy_manager_v1` 的 Wayland 合成器上完成校准，并可注册调用方自己的渲染模板做稳态追踪：L1 模板匹配 + L8 门控差分融合进常速度 Kalman 跟踪器（L7，P2-c）——拖拽跟随、动画期滑行（置信度 0 的标注信念而非伪造测量）、丢失后重捕获。X11、Windows、macOS、GNOME（portal 路径）的 backend 尚未实现。
+当前可在 Niri / Sway / Hyprland / KDE Plasma 等支持 `zwlr_layer_shell_v1` + `zwlr_screencopy_manager_v1` 的 Wayland 合成器上以 L9 校准，在真 X server 上以 L0 校准（后端由 `FidusBuilder` 自动选择：layer-shell 优先，其次 X11），并可注册调用方自己的渲染模板做稳态追踪：L1 模板匹配 + L8 门控差分融合进常速度 Kalman 跟踪器（L7，P2-c）——拖拽跟随、动画期滑行（置信度 0 的标注信念而非伪造测量）、丢失后重捕获。Windows、macOS、GNOME（portal 路径）的 backend 尚未实现。
+
+> **fidus 是全平台统一兜底库。** 零信任是主动选择的设计立场，不是 Wayland 专属的权宜之计——Wayland 只是"平台 API 不可信"的最极端实例（实测：`success` 却返回 `(0,0)`）。L0 Anchor 因此被设计为只依赖"投射 + 截屏"两个原语的**通用**校准器：Gate 按能力（能否同时投射多个标记）而非平台身份决定它是否可用。
 
 ## 五条设计原则（附录 A，一切功能的优先级高于功能本身）
 
@@ -38,12 +40,13 @@ crates/
 │                                  io.rs         CalibrationIo 会话（仅有的两个原语）
 │                                  engine.rs     Calibrator/Estimator trait + FallbackEngine
 ├── fidus-backend-wayland-layer/ 仅适配基础原语：layer-shell 投影 + wlr-screencopy 截屏
-├── fidus-calibrate/             L9 Crosshair 校准器（L0/L10 占位）
+├── fidus-backend-x11/           仅适配基础原语：override-redirect 窗口投影（每标记一窗）+ GetImage(root) 截屏
+├── fidus-calibrate/             L9 Crosshair + L0 Anchor 校准器；共享 detect.rs 差分检测器（L10 占位）
 ├── fidus-estimate/              C 层估计器：L1 Fingerprint + L8 EdgeSync/MotionGate + L4/L7 融合（常速度 KF）
-└── fidus/                       伞 crate：FidusBuilder 后端选择 + 冒烟测试二进制
+└── fidus/                       伞 crate：FidusBuilder 后端选择（Auto/WaylandLayer/X11）+ 冒烟测试二进制
 ```
 
-`fidus-backend-*` 只适配"画标记、截屏幕"的原语，**永不**绑定任何报告窗口几何的协议——这是零信任在 backend 层的落地。
+`fidus-backend-*` 只适配"画标记、截屏幕"的原语，**永不**绑定任何报告窗口几何的协议——这是零信任在 backend 层的落地。X11 backend 的 override-redirect 窗口是 fidus **自己**创建、放在**自己**选的坐标上的，与 layer-shell margin 同一性质。
 
 ## 坐标语义
 
@@ -65,30 +68,46 @@ crates/
 7. **一致性**：两轮 pass 的映射在 5 个探针点上偏差 > 1.5px 即拒绝（对应 §4.3"至少 2 轮独立采样验证映射一致性"）。
 8. **Teardown**：`destroy_projector` 在成功、失败、Drop 三条路径上全部执行（§4.4）。
 
+## L0 校准协议（通用兜底，规格 §4.3 的加固版）
+
+L9 有"置顶 layer surface"的保证，L0 只有"几个我们自己建的窗口"——检测器不能假设哨兵是屏幕上最大的变化。因此 L0 叠了四道彼此独立的防线：
+
+1. **基线差分 ∧ 颜色**：哨兵 = *相对隐藏基线发生变化* **且** *带哨兵色* 的像素区域。壁纸里碰巧有哨兵色的色块在两帧中相同，被差分抵消；只有在基线与捕获**之间**变化的东西才可能干扰，而那会以歧义/未检出的形式进入重试。
+2. **颜色→角点随机打乱**（每次尝试重洗）：移动的诱饵每次要伪装的角点都不同。
+3. **矩形约束**：四个角的位置每轮按"整条边"抖动（仍是轴对齐矩形），仿射保持平行与中点，所以检出的四个中心必须构成等对角线的平行四边形——某一角被诱饵顶替会剧烈破坏它。
+4. **验证轮 + 双 pass 一致性**：解出映射后先预测再检测 2 个全新内部位置（> 1.5px 拒绝），两轮独立 pass 在 5 个探针点偏差 > 1.5px 拒绝。
+
+四个哨兵**同时**投射、单次捕获——真 X server 上整轮校准约 60ms。对应点同样取 bbox 几何中心。
+
+**rootless XWayland 的诚实拒绝**：Wayland 合成器下的 XWayland 没有根窗口画面，`GetImage(root)` 返回 `BadMatch`。X11 backend 在连接时探测一次截屏；失败则把 `screen_capture_permission` 报为 `Revoked`，Gate 拒绝、`FidusBuilder::Auto` 落到下一个后端——不会校准到一半才失败。
+
 ## 快速开始
 
-实机冒烟测试（屏幕上会闪现约两秒的品红色标记方块）：
+实机冒烟测试（Wayland 下屏幕上会闪现约两秒的品红色标记方块；X11 下四角闪现四色哨兵）：
 
 ```bash
 cargo run --release -p fidus --bin fidus-calibrate
+# 强制后端 / 偏好校准器（Gate 仍有最终决定权）：
+FIDUS_BACKEND=x11 FIDUS_METHOD=anchor cargo run --release -p fidus --bin fidus-calibrate
 ```
 
-四个阶段分别验证：连接与原语探测 → 单帧截屏 → Gate 查询 + 完整校准 → teardown（`niri msg layers | grep fidus` 应无输出）。
+四个阶段分别验证：后端连接 + 环境探测 → 所有方法的 Gate 回答 → 完整校准 → teardown（`niri msg layers | grep fidus` / `xwininfo -root -tree` 应无 fidus 窗口）。
 
 作为库使用：
 
 ```rust
 use fidus::prelude::*;
 
+// 后端自动选择：layer-shell 优先，其次 X11（也可 build_with(BackendChoice::X11)）
 let mut engine = FidusBuilder::new().build()?;
 
-// 1. 先查询，再决定要不要校准（§5.4）
-match engine.gate().query_calibrator_availability(CalibrationMethod::Crosshair) {
-    CalibrationStatus::Available { .. } | CalibrationStatus::Degraded { .. } => {}
-    status => { eprintln!("不可用：{status:?}"); return Ok(()); }
-}
+// 1. 先查询，再决定要不要校准（§5.4）；构建时已按 Gate 选好校准器（L9 → L0）
+let usable = CalibrationMethod::ALL
+    .iter()
+    .any(|m| engine.gate().query_calibrator_availability(*m).is_usable());
+if !usable { eprintln!("此环境无可用校准器"); return Ok(()); }
 
-// 2. 校准一次；返回时 overlay 已销毁
+// 2. 校准一次；返回时 overlay / 标记窗口已销毁
 let frame = engine.calibrate()?;
 println!("scale {:.3}, rms {:.3}px",
     frame.map().linear_scale(), frame.quality().rms_residual_px);
@@ -113,17 +132,18 @@ let _ = engine.estimate();
 ## 测试
 
 ```bash
-cargo test     # 48 个测试：数学、Gate、检测器、端到端仿真、L1/L8/L7 估计器
+cargo test     # 58 个测试：数学、Gate、检测器、L9/L0 端到端仿真、L1/L8/L7 估计器
 cargo clippy   # 零警告
 ```
 
-其中 `fidus-calibrate` 的**仿真测试**（`tests/sim.rs`）在无 Wayland 的环境下模拟整个合成器行为：分数缩放 1.25 + 面板偏移的精确恢复、动态壁纸噪声下收敛、光标穿透标记后 bbox 中心不变、双标记歧义拒绝、盲投影/小屏幕失败路径的 teardown。实机上踩过的每个坑都固化为回归测试。
+其中 `fidus-calibrate` 的**仿真测试**在无显示服务器的环境下模拟整个合成器行为。`tests/sim.rs`（L9）：分数缩放 1.25 + 面板偏移的精确恢复、动态壁纸噪声下收敛、光标穿透标记后 bbox 中心不变、双标记歧义拒绝、盲投影/小屏幕失败路径的 teardown。`tests/anchor_sim.rs`（L0）：1.5× 缩放 + 原点偏移恢复、**静态哨兵色壁纸无害**（差分抵消）、**动画哨兵色诱饵必须拒绝而非吸收**、单 surface 后端干净拒绝。实机上踩过的每个坑都固化为回归测试。
 
 ## 已知限制（对应规格 §10 开放问题）
 
 - **单输出**：多显示器时 Gate 返回 `Degraded`，只校准第一个输出（§10.4 未定案前的诚实降级）。
 - 动态壁纸探测：`EnvironmentContext.is_dynamic_wallpaper` 目前只能由调用方提供，库内未实现 ScreenClassifier；L8 的 MotionGate 输入门控已落地（P2-b），自动探测仍待实现。
-- **L0 Anchor / L10 GradientField**：Gate 诚实返回 `NotImplementedYet` / `FeatureDisabled`。
+- **L0 在 rootless XWayland 上不可用**（见上文）；Windows / macOS 的 window-per-marker 后端未实现——L0 校准器本身已就绪，只差后端。
+- **L10 GradientField**：Gate 诚实返回 `FeatureDisabled`。
 - **GNOME（无 layer-shell）**：需要 `fidus-backend-wayland-portal`，未实现。
 - **Y_INVERT**：screencopy 的 Y 反转已处理并有单测，但仅在实机（Niri 不置位该标志）验证过非反转路径。
 

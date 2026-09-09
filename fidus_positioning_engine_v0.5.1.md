@@ -196,6 +196,14 @@ query():
 
 创建 4 个 2×2 像素纯色方块（颜色取高饱和冷门色），锚定虚拟屏幕四角。每次校准随机打乱“颜色→角点”的映射并立即销毁重建，至少通过 2 轮独立采样验证映射一致性，并结合几何矩形约束确认，方可输出 CoordinateFrame。
 
+> **实现细化（P2-d，2026-09-09）**：
+> - **检测 = 基线差分 ∧ 颜色**，而非单纯找色。L0 没有 L9 的"置顶 overlay"保证，纯找色会被壁纸里的同色块欺骗；先截"标记隐藏"基线，再要求哨兵像素既*变化*又*带哨兵色*，静态同色块在差分中抵消。只有在两帧之间移动的诱饵能干扰，而那以歧义/未检出进入重试——与 L9 的原则一致：干扰只能让单次测量失效，无法伪造。
+> - **角点按"整条边"抖动**：四角位置每轮随机，但仍是轴对齐矩形，矩形约束（等对角线平行四边形）继续成立。
+> - **验证轮**：与 L9 一致，解出映射后先预测再检测全新内部位置。
+> - **标记尺寸**：2×2 作为配置下限，默认 8×8（2px 低于任何真实截屏的噪声底）。
+> - **依赖原语**：只需"投射 + 截屏"，外加"同时投射多个标记"的能力（§5.2 `multi_marker_projection`）。Gate **按能力而非平台身份**判定 L0 可用性——它是全平台兜底，不是"X11 专属"。
+> - **已知不可用环境**：rootless XWayland（`GetImage(root)` → `BadMatch`）；X11 backend 连接时探测一次截屏并诚实报告。
+
 ### 4.4 校准生命周期（teardown 是关键）
 
 ```
@@ -251,6 +259,9 @@ pub struct EnvironmentContext {
     pub compositor_type: CompositorKind,   // Niri / Sway / KWin / Mutter / ...
     pub screen_capture_permission: PermissionState,
     pub wayland_input_region_supported: bool,
+    /// P2-d 新增：后端能否同时投射多个标记（每标记一窗 → true；单 layer surface → false）。
+    /// L0 Anchor 的能力前提。这是能力描述，不是平台身份。
+    pub multi_marker_projection: bool,
 }
 ```
 
@@ -344,7 +355,7 @@ fidus-extras        // 业务特定项：L3 Beacon / L5 TUIScan（移出核心�
 |---|---|---|
 | **P0** | §1 精神内核 + §6 概率池纯净性 + §5 能力探测接口 | **架构地基，先于一切代码** |
 | **P1** | L9 Crosshair（Niri 实机验证）+ teardown 生命周期 | 旗舰校准器 |
-| **P2** | L0 Anchor（通用兜底）+ C 层 L1/L8 增量追踪 | 覆盖无 layer-shell 环境 |
+| **P2** | L0 Anchor（通用兜底）+ C 层 L1/L8 增量追踪 | 覆盖无 layer-shell 环境。✅ 已完成（P2-a/b/c/d；X11 backend 随 P2-d 落地） |
 | **P3** | L10 GradientField（feature-gated，实验性） | 仅研究，不承诺默认启用 |
 
 > **重要顺序**：先确立"零信任 + 概率池纯净"的架构约束，再写校准器代码。这与 v0.4 把 C shim 当 P3 的顺序**完全相反**。

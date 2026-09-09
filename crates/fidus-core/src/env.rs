@@ -23,6 +23,9 @@ pub enum CompositorKind {
     Labwc,
     /// Wayfire.
     Wayfire,
+    /// A plain X11 display server (or an XWayland screen). The L0 Anchor
+    /// calibrator's territory.
+    X11,
     /// Something else; free-form identifier.
     Other(String),
     /// Could not be determined.
@@ -53,6 +56,7 @@ impl CompositorKind {
                 "weston" => return CompositorKind::Weston,
                 "labwc" => return CompositorKind::Labwc,
                 "wayfire" => return CompositorKind::Wayfire,
+                "x11" | "xorg" => return CompositorKind::X11,
                 _ => {}
             }
         }
@@ -135,6 +139,12 @@ pub struct EnvironmentContext {
     /// Whether input regions of projected surfaces are honored (click-through
     /// support).
     pub wayland_input_region_supported: bool,
+    /// Whether the backend can project several markers **at once** (one
+    /// window per marker on X11/Windows; a single layer surface cannot).
+    /// Required by the L0 Anchor calibrator, which places four sentinels
+    /// simultaneously (spec §4.3). A capability, not a platform identity:
+    /// the gate reasons about primitives, never about "which OS is this".
+    pub multi_marker_projection: bool,
 }
 
 impl Default for EnvironmentContext {
@@ -146,6 +156,7 @@ impl Default for EnvironmentContext {
             compositor_type: CompositorKind::Unknown,
             screen_capture_permission: PermissionState::Unknown,
             wayland_input_region_supported: true,
+            multi_marker_projection: false,
         }
     }
 }

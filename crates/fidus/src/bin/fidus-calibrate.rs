@@ -1,78 +1,73 @@
-//! fidus-calibrate — P1 smoke test: the full L9 loop on the live compositor.
+//! fidus-calibrate — live smoke test: the full calibration loop on
+//! whatever backend the builder picks (layer-shell first, then X11).
 //!
 //! Stages (each prints before the next runs, so failures localize):
-//!   1. connect + primitive probe on a dedicated backend connection
-//!   2. one screen capture (screencopy path)
-//!   3. gate query + full Crosshair calibration through the engine
-//!   4. teardown reminder (`niri msg layers` must show no fidus-calib)
+//!   1. backend connect + probed environment (via the engine builder)
+//!   2. gate answers for every calibration method
+//!   3. full calibration through the engine with the gate-selected method
+//!   4. teardown reminder (`niri msg layers` / `xwininfo -root -tree` must
+//!      show no fidus windows)
+//!
+//! `FIDUS_BACKEND=wayland|x11` forces a backend; `FIDUS_METHOD=crosshair|anchor`
+//! prefers a calibrator (the gate still decides).
 //!
 //! Exit codes: 0 success, 1 calibration failed, 2 init/connect failed,
-//! 3 gate says unavailable.
+//! 3 gate says nothing is available.
 
 use fidus::prelude::*;
-use fidus::wayland::WaylandLayerBackend;
-use fidus::FidusBuilder;
 
 fn main() {
-    // Stage 1+2: raw backend diagnostics on a dedicated connection, so
-    // capture problems are separated from engine-flow problems.
-    let mut backend = match WaylandLayerBackend::connect() {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("[stage 1] connect failed: {e}");
-            std::process::exit(2);
-        }
+    let choice = match std::env::var("FIDUS_BACKEND").as_deref() {
+        Ok("wayland") | Ok("wayland-layer") => BackendChoice::WaylandLayer,
+        Ok("x11") => BackendChoice::X11,
+        _ => BackendChoice::Auto,
     };
-    println!("[stage 1] primitives available: {}", backend.primitives_available());
-    match backend.capture_once() {
-        Ok(frame) => println!(
-            "[stage 2] capture ok: {}x{} px, stride {}, format {:?}",
-            frame.width, frame.height, frame.stride, frame.format
-        ),
-        Err(e) => {
-            eprintln!("[stage 2] capture failed: {e}");
-            std::process::exit(2);
-        }
+    let mut builder = FidusBuilder::new();
+    match std::env::var("FIDUS_METHOD").as_deref() {
+        Ok("anchor") => builder = builder.prefer_method(CalibrationMethod::Anchor),
+        Ok("crosshair") => builder = builder.prefer_method(CalibrationMethod::Crosshair),
+        _ => {}
     }
-    drop(backend);
 
-    // Stage 3: the full public flow on a fresh connection. A fixed seed
-    // keeps diagnostic runs reproducible while we chase the noise: two runs
-    // with the same seed re-sample the same positions, so centroid deltas
-    // between runs isolate environment noise exactly.
-    let mut engine = match FidusBuilder::new()
-        .with_crosshair_config(CrosshairConfig {
-            seed: Some(42),
-            ..CrosshairConfig::default()
-        })
-        .build()
-    {
+    // Stage 1: connect + probe.
+    let mut engine = match builder.build_with(choice) {
         Ok(e) => e,
-            Err(e) => {
-            eprintln!("[stage 3] calibration failed: {e}");
-            // exit(1) skips stage 4 below, so remind here — teardown ran via
-            // the calibrator + session Drop; verify externally.
-            eprintln!("[stage 4] verify teardown: `niri msg layers | grep -i fidus` — expect no output");
-            std::process::exit(1);
+        Err(e) => {
+            eprintln!("[stage 1] backend init failed ({choice:?}): {e}");
+            std::process::exit(2);
         }
     };
-    let status = engine.gate().query_calibrator_availability(CalibrationMethod::Crosshair);
-    println!("[stage 3] gate: {status:?}");
-    if !status.is_usable() {
+    println!("[stage 1] environment: {:?}", engine.environment());
+
+    // Stage 2: gate answers, all methods.
+    let mut any = false;
+    for method in CalibrationMethod::ALL {
+        let status = engine.gate().query_calibrator_availability(method);
+        any |= status.is_usable();
+        println!("[stage 2] gate {:>16}: {status:?}", method.name());
+    }
+    if !any {
+        eprintln!("[stage 2] no calibration method is usable here");
         std::process::exit(3);
     }
 
+    // Stage 3: calibrate with the gate-selected method.
     let t0 = std::time::Instant::now();
     match engine.calibrate() {
         Ok(frame) => {
             let q = frame.quality();
+            let m = frame.map();
             println!(
-                "[stage 3] calibrated in {:.1}s: {}, capture {}x{}, linear scale {:.4}",
+                "[stage 3] calibrated in {:.2}s: {}, capture {}x{}, linear scale {:.4}",
                 t0.elapsed().as_secs_f64(),
                 frame.method().name(),
                 frame.capture_size().0,
                 frame.capture_size().1,
-                frame.map().linear_scale()
+                m.linear_scale()
+            );
+            println!(
+                "[stage 3] map: [{:.4} {:.4} {:.2}; {:.4} {:.4} {:.2}]",
+                m.a, m.b, m.c, m.d, m.e, m.f
             );
             println!(
                 "[stage 3] quality: rms {:.3}px, max {:.3}px, verify {:.3}px, consistency {:.3}px, samples {}, passes {}",
@@ -82,11 +77,13 @@ fn main() {
         }
         Err(e) => {
             eprintln!("[stage 3] calibration failed: {e}");
+            eprintln!("[stage 4] verify teardown externally (see below)");
             std::process::exit(1);
         }
     }
 
-    // Stage 4: teardown is enforced by the session's Drop inside calibrate();
-    // verify externally that no layer surface lingers.
-    println!("[stage 4] verify teardown: `niri msg layers | grep fidus` — expect no output");
+    // Stage 4: teardown is enforced inside calibrate(); verify externally.
+    println!(
+        "[stage 4] verify teardown: `niri msg layers | grep fidus` (Wayland) / `xwininfo -root -tree` (X11) — expect no fidus windows"
+    );
 }

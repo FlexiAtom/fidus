@@ -10,6 +10,19 @@ fn niri_env() -> EnvironmentContext {
         compositor_type: CompositorKind::Niri,
         screen_capture_permission: PermissionState::Granted,
         wayland_input_region_supported: true,
+        multi_marker_projection: false,
+    }
+}
+
+fn x11_env() -> EnvironmentContext {
+    EnvironmentContext {
+        has_layer_shell: false,
+        is_dynamic_wallpaper: None,
+        multi_monitor_count: 1,
+        compositor_type: CompositorKind::X11,
+        screen_capture_permission: PermissionState::Granted,
+        wayland_input_region_supported: false,
+        multi_marker_projection: true,
     }
 }
 
@@ -58,11 +71,53 @@ fn revoked_capture_permission_requires_permission_flow() {
 }
 
 #[test]
-fn unimplemented_methods_are_honest() {
+fn gradient_field_is_honestly_feature_gated() {
     let gate = ProbeGate::from_environment(niri_env());
-    for m in [CalibrationMethod::Anchor, CalibrationMethod::GradientField] {
-        assert!(!gate.query_calibrator_availability(m).is_usable());
-    }
+    assert!(matches!(
+        gate.query_calibrator_availability(CalibrationMethod::GradientField),
+        CalibrationStatus::NotSupported { reason: UnsupportedReason::FeatureDisabled { .. }, .. }
+    ));
+}
+
+#[test]
+fn anchor_needs_multi_marker_projection_not_a_platform_name() {
+    // Single-surface backend (layer-shell): L0 cannot place four sentinels.
+    let gate = ProbeGate::from_environment(niri_env());
+    assert!(matches!(
+        gate.query_calibrator_availability(CalibrationMethod::Anchor),
+        CalibrationStatus::NotSupported { reason: UnsupportedReason::MissingPrimitive { .. }, .. }
+    ));
+
+    // The capability decides, not the compositor identity: an unknown
+    // platform that provides the primitives qualifies.
+    let env = EnvironmentContext { compositor_type: CompositorKind::Unknown, ..x11_env() };
+    assert_eq!(
+        ProbeGate::from_environment(env).query_calibrator_availability(CalibrationMethod::Anchor),
+        CalibrationStatus::Available { method: CalibrationMethod::Anchor }
+    );
+
+    // Layer-shell absence does not concern L0; Crosshair stays unavailable.
+    let gate = ProbeGate::from_environment(x11_env());
+    assert!(gate.query_calibrator_availability(CalibrationMethod::Anchor).is_usable());
+    assert!(!gate.query_calibrator_availability(CalibrationMethod::Crosshair).is_usable());
+}
+
+#[test]
+fn anchor_respects_capture_permission_and_degrades_on_dynamic_wallpaper() {
+    let env = EnvironmentContext {
+        screen_capture_permission: PermissionState::Revoked,
+        ..x11_env()
+    };
+    assert!(matches!(
+        ProbeGate::from_environment(env).query_calibrator_availability(CalibrationMethod::Anchor),
+        CalibrationStatus::PermissionRequired { .. }
+    ));
+
+    let env = EnvironmentContext { is_dynamic_wallpaper: Some(true), ..x11_env() };
+    assert!(matches!(
+        ProbeGate::from_environment(env).query_calibrator_availability(CalibrationMethod::Anchor),
+        CalibrationStatus::Degraded { .. }
+    ));
 }
 
 #[test]

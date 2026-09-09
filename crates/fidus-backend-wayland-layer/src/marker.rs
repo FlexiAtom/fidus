@@ -210,21 +210,20 @@ fn attach_and_settle(
     let surface = projector.surface.clone();
     let size = projector.buffers.as_ref().expect("buffers allocated").size;
 
-    {
+    for _ in 0..SETTLE_FRAMES {
         let buffers = projector.buffers.as_ref().expect("buffers allocated");
         let buf = if marker_visible { &buffers.marker } else { &buffers.clear };
+
+        // frame 请求必须与 attach 同一批次先于 commit 发出；否则后续裸提交
+        // 按 Wayland 语义等价于 attach(null)，会分离 buffer，marker 在
+        // show() 返回前就已消失。
         surface.attach(Some(buf), 0, 0);
         surface.damage_buffer(0, 0, size as i32, size as i32);
-    }
-    surface.commit();
-
-    // Presentation sync: request a frame callback *before* each commit so it
-    // fires for the repaint that includes this buffer.
-    for _ in 0..SETTLE_FRAMES {
-        l.st.cb_target = l.st.cb_done + 1;
         surface.frame(&l.st.qh, ());
         surface.commit();
-        let target = l.st.cb_target;
+
+        let target = l.st.cb_done + 1;
+        l.st.cb_target = target;
         l.wait_for(Duration::from_secs(2), |st| st.cb_done >= target || st.closed)
             .map_err(|_| MarkerError::Timeout)?;
         if l.st.closed {

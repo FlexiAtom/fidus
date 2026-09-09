@@ -58,11 +58,19 @@
 
 pub use fidus_core::engine::InitError;
 
-/// Backend selection: the layer-shell backend, serving wlroots-like
-/// compositors (Niri / Sway / Hyprland), KDE Plasma, and partial GNOME.
+/// The layer-shell backend, serving wlroots-like compositors (Niri / Sway /
+/// Hyprland), KDE Plasma, and partial GNOME. Hosts the L9 Crosshair
+/// calibrator.
 #[cfg(feature = "wayland-layer")]
 pub mod wayland {
     pub use fidus_backend_wayland_layer::WaylandLayerBackend;
+}
+
+/// The X11 backend (override-redirect windows + `GetImage`), serving real X
+/// servers. Hosts the L0 Anchor calibrator.
+#[cfg(feature = "x11")]
+pub mod x11 {
+    pub use fidus_backend_x11::X11Backend;
 }
 
 pub mod prelude {
@@ -71,8 +79,7 @@ pub mod prelude {
     pub use crate::builder::{BackendChoice, FidusBuilder};
     pub use fidus_core::engine::FallbackEngine;
     pub use fidus_core::prelude::*;
-    pub use fidus_calibrate::CrosshairCalibrator;
-    pub use fidus_calibrate::CrosshairConfig;
+    pub use fidus_calibrate::{AnchorCalibrator, AnchorConfig, CrosshairCalibrator, CrosshairConfig};
     pub use fidus_estimate::{FingerprintEstimator, FusedEstimator};
 }
 

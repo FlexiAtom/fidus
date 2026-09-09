@@ -79,6 +79,9 @@ impl WaylandLayerBackend {
                 PermissionState::Unknown
             },
             wayland_input_region_supported: true,
+            // One layer surface per projector: no simultaneous multi-marker
+            // projection here (L9 does not need it; L0 stays gated off).
+            multi_marker_projection: false,
         }
     }
 
