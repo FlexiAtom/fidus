@@ -1,12 +1,18 @@
-# Niri (Wayland) 点击穿透技术方案
+# layer-shell 原语手册（Wayland / wlroots）
 
-> 适用环境：Niri 26.04+ (wlroots)，Wayland，layer-shell 协议
-> 验证日期：2026-08-30
-> 状态：✅ 已实装到测试版，实机确认可用
+> **读者**：fidus backend 实现者与移植者。
+> 本文是 fidus 赖以工作的两个原语——**投射**与**穿透**——的实机验证记录。
+> 架构规范见 [`spec.md`](spec.md)；本文只讲"协议层面到底怎么做才不出错"。
+>
+> 适用环境：Niri 26.04+ (wlroots)，Wayland，layer-shell 协议 · 验证日期 2026-08-30 · 实机确认可用
+>
+> **本文与 fidus 的关系**：第 2–3 节的穿透公式与协议时序、Q8 锚定陷阱、Q9 读取时序，已全部落地于 `fidus-backend-wayland-layer`。第 6 节（PyQt 集成）与第 4 节的 C 代码属**历史实现**，fidus 用 Rust + `wayland-client` 重写，保留它们仅作协议时序的可执行佐证。
+>
+> *原标题《有关メア桌宠的Niri上的点击穿透实现路径》，P2-g 去桌宠化后升格为 backend 手册。*
 
 ## 1. 结论（TL;DR）
 
-在 Niri 上实现"桌宠/浮窗点击穿透"，**唯一可靠的方式**是：
+在 wlroots 系合成器上实现"浮窗点击穿透"，**唯一可靠的方式**是：
 
 **使用 `wlr-layer-shell-unstable-v1`，创建一个 `overlay` 层级的 layer surface，并设置 `keyboard_interactivity = NONE` + 空 input region。**
 
@@ -284,9 +290,11 @@ gcc minimal_layer_shell.c \
 
 ---
 
-## 5. 运行时切换穿透（桌宠常用）
+## 5. 运行时切换穿透
 
-桌宠需要在"穿透模式"（让鼠标穿过宠物点到桌面）和"交互模式"（能拖动/点击宠物）之间切换。做法是**动态替换 input region**：
+浮窗常需在"穿透模式"（鼠标穿过窗口点到桌面）与"交互模式"（可拖动/点击）之间切换。做法是**动态替换 input region**：
+
+> **fidus 用到的是前者**：校准期间标记窗口必须全程穿透，绝不能截获用户输入（原则五：测绘队不是房客）。
 
 ```c
 /* 穿透：设置空 region */
@@ -425,7 +433,7 @@ struct wl_display* get_qt_display() {
 
 ### Q7: 如何确认 surface 身份
 ```bash
-niri msg layers | grep meapet
+niri msg layers | grep fidus
 ```
 查看当前所有 layer surface，确认我们的 surface 存在且 namespace 正确。
 
@@ -444,7 +452,7 @@ zwlr_layer_surface_v1_set_anchor(ls,
 ```
 
 ### Q9: 位置同步要在 `hide()` 之前取坐标
-**现象**：切回穿透模式后，桌宠位置停留在拖动前的位置。
+**现象**：切回穿透模式后，窗口位置停留在拖动前的位置。
 **原因**：Wayland 客户端无法查询自身全局坐标；`hide()` 之后窗口位置信息即失效。
 **解决**：切换顺序必须是——先取坐标 → 同步给 layer surface → 最后 `hide()`：
 ```python
@@ -508,5 +516,5 @@ self.hide()                 # ③ 最后才隐藏
 
 ---
 
-若文档无法复现以项目仓库的实际代码为准：https://github.com/suan-11/mea-pet-public
+本文的原始出处为 MeaPet 项目（fidus 的首个消费方）。fidus 自身的实现以 `crates/fidus-backend-wayland-layer/` 为准。
 作者：Hy4 preview（AI）、FlexiAtom（人）

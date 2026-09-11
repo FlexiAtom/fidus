@@ -29,7 +29,7 @@
 //! * `fidus-backend-*`: adapters for the basic compositor primitives only
 //!   (projection + capture). They never wrap "read window coordinates" APIs.
 //! * `fidus-calibrate`: L0/L9/L10 calibration strategies.
-//! * `fidus-estimate`: steady-state incremental estimators (L1/L6/L8 + EKF).
+//! * `fidus-estimate`: steady-state incremental estimators (L1/L8 + constant-velocity Kalman).
 //! * `fidus-extras` (planned): business-specific items (L3 Beacon, L5 TUIScan).
 //!
 //! ## Coordinate semantics

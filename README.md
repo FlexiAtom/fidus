@@ -2,9 +2,10 @@
 
 > *当窗口系统拒绝开口，你就自己把坐标系画在墙上。*
 >
-> 规格文档：[`fidus_positioning_engine_v0.5.1.md`](./fidus_positioning_engine_v0.5.1.md)（架构冻结候选）
-> · 方法论：[v0.4 草案](./fidus%20定位引擎（草案%20v0.4）.md)
-> · Niri 实机验证：[点击穿透实现路径](./有关メア桌宠的Niri上的点击穿透实现路径.md)
+> **想读懂设计** → [`docs/spec.md`](./docs/spec.md)（唯一规范源）
+> **想写后端 / 移植平台** → [`docs/backend-contract.md`](./docs/backend-contract.md)（后端契约）+ [`docs/layer-shell-primer.md`](./docs/layer-shell-primer.md)（Wayland 原语手册）
+> **想改代码** → [`AGENTS.md`](./AGENTS.md)（项目约定，每条都对应一次真实踩坑）
+> **想考古** → [`docs/history/`](./docs/history/)（前身草案，均已被取代，勿据此实现）
 
 fidus 是一个纯 Rust 定位库：在平台窗口坐标 API 不可信的环境下，它**不封装任何原生坐标 API**，而是用最基础的合成器原语（`wl_surface` / `wl_shm` / layer-shell、通用截屏）投射自己的标记、截取自己的屏幕、解算自己的坐标系。**定位什么由调用方决定；fidus 提供地图。**
 
@@ -143,7 +144,9 @@ $ FIDUS_BACKEND=x11 cargo run -p fidus --bin fidus-calibrate
 >
 > L0 Anchor 因此被设计为只依赖"投射 + 截屏"两个原语的**通用**校准器：Gate 按**能力**（能否同时投射多个标记）而非平台身份决定它是否可用。Windows / macOS 缺的只是 backend（各约 300 行原语适配），校准器与估计器一行不用改。
 
-## 五条设计原则（附录 A，一切功能的优先级高于功能本身）
+## 五条设计原则
+
+> 规范表述见 [`docs/spec.md` 附录 A 与 §1.1](./docs/spec.md)。**任何新增功能若与之冲突，改功能，不改原则。**
 
 1. **Trust no platform API.** 不信任任何平台坐标 API——公开 API 在类型层面不存在"坐标输入"这一入口。
 2. **Build your own map.** 自带测绘工具：投射已知标记 → 截屏检测 → 解算映射。
@@ -172,36 +175,21 @@ crates/
 
 ## 坐标语义
 
-校准成功后产出 `CoordinateFrame`：一条**逻辑空间 ↔ 物理空间**的仿射映射。
+校准产出 `CoordinateFrame`：一条**逻辑空间 ↔ 物理空间**的仿射映射。
 
-- **逻辑空间**：被校准输出的 layer-shell usable-area 坐标——与 layer-shell margin 同一坐标系，桌宠拿到后可直接喂给 `overlay_set_position()`。
+- **逻辑空间**：layer-shell usable-area 坐标——与 layer-shell margin 同一坐标系，调用方拿到后可直接用于自己的窗口摆放。
 - **物理空间**：fidus 自己截屏里的像素坐标（Y 反转已由 backend 归一化）。
 
-两个侧面都是 fidus 自产量：逻辑侧锚定在 fidus 自己选的标记 margin 上，物理侧锚定在 fidus 自己截到的像素上。仿射求解天然吸收合成器藏起来的一切——usable-area 偏移（面板/独占区）、分数缩放、输出旋转变换——全程没有读取过一个平台坐标。
+两侧都是 fidus 自产量。仿射求解天然吸收合成器藏起来的一切——usable-area 偏移（面板/独占区）、分数缩放、输出旋转——全程没有读取过一个平台坐标。
 
-## L9 校准协议（本仓库的实现细化）
+## 校准协议
 
-1. **可用区探针**：overlay surface 以"四边锚定 + 尺寸 0"创建，configure 事件宣告 usable-area 尺寸——**仅作标记布点的提示**，永不进入概率池；提示错了的后果只是标记出屏、检测不到、自动重试，自我纠正。
-2. **基线帧**：标记隐藏时截屏。
-3. **标记序列**：两轮独立 pass，各采样 4 个抖动、乱序的 usable-area 角点（margin 预先量化到整数逻辑像素，与 backend 的 round 严格一致）。
-4. **检测**：基线差分 + 连通域。overlay 永远置顶且由 fidus 控制，因此**差分把标记从任意背景中隔离**——动态壁纸最多让单次测量失效（歧义 → 重试），无法伪造。面积门控（先验 = 首个检出标记的面积）滤掉壁纸漂移与光标小块；对应点取标记 bbox 的**几何中心**（排他边界），对光标穿透标记造成的空洞不敏感，也无像素索引质心的 −0.5px 约定偏差。
-5. **求解**：≥4 组对应点做 2×3 仿射最小二乘（支持旋转输出）；残差、线性尺度 sanity 门控。
-6. **验证**：3 个全新位置先预测后检测，误差 > 1.5px 即拒绝。
-7. **一致性**：两轮 pass 的映射在 5 个探针点上偏差 > 1.5px 即拒绝（对应 §4.3"至少 2 轮独立采样验证映射一致性"）。
-8. **Teardown**：`destroy_projector` 在成功、失败、Drop 三条路径上全部执行（§4.4）。
+- **L9 Crosshair**（layer-shell 环境）：可用区探针 → 基线帧 → 两轮各 4 个抖动乱序角点 → 基线差分 + 连通域检测 → 仿射最小二乘 → 3 点验证 → 双 pass 一致性 → 强制 teardown。
+- **L0 Anchor**（通用兜底）：四个哨兵同时投射、单次捕获，叠四道独立防线——基线差分 ∧ 颜色、颜色→角点随机打乱、矩形约束、验证轮 + 双 pass 一致性。真 X server 上整轮约 60ms。
 
-## L0 校准协议（通用兜底，规格 §4.3 的加固版）
+> 逐步细节与每一步的**失效模式**见规格 [§4.1](./docs/spec.md)（L9）与 [§4.3](./docs/spec.md)（L0）。
 
-L9 有"置顶 layer surface"的保证，L0 只有"几个我们自己建的窗口"——检测器不能假设哨兵是屏幕上最大的变化。因此 L0 叠了四道彼此独立的防线：
-
-1. **基线差分 ∧ 颜色**：哨兵 = *相对隐藏基线发生变化* **且** *带哨兵色* 的像素区域。壁纸里碰巧有哨兵色的色块在两帧中相同，被差分抵消；只有在基线与捕获**之间**变化的东西才可能干扰，而那会以歧义/未检出的形式进入重试。
-2. **颜色→角点随机打乱**（每次尝试重洗）：移动的诱饵每次要伪装的角点都不同。
-3. **矩形约束**：四个角的位置每轮按"整条边"抖动（仍是轴对齐矩形），仿射保持平行与中点，所以检出的四个中心必须构成等对角线的平行四边形——某一角被诱饵顶替会剧烈破坏它。
-4. **验证轮 + 双 pass 一致性**：解出映射后先预测再检测 2 个全新内部位置（> 1.5px 拒绝），两轮独立 pass 在 5 个探针点偏差 > 1.5px 拒绝。
-
-四个哨兵**同时**投射、单次捕获——真 X server 上整轮校准约 60ms。对应点同样取 bbox 几何中心。
-
-**rootless XWayland 的诚实拒绝**：Wayland 合成器下的 XWayland 没有根窗口画面，`GetImage(root)` 返回 `BadMatch`。X11 backend 在连接时探测一次截屏；失败则把 `screen_capture_permission` 报为 `Revoked`，Gate 拒绝、`FidusBuilder::Auto` 落到下一个后端——不会校准到一半才失败。
+**rootless XWayland 的诚实拒绝**：Wayland 合成器下的 XWayland 没有根窗口画面，`GetImage(root)` 返回 `BadMatch`。X11 backend 在连接时探测一次截屏；失败则把 `screen_capture_permission` 报为 `Revoked`，Gate 拒绝、`FidusBuilder::Auto` 落到下一个后端——**不会校准到一半才失败**。
 
 ## 快速开始
 
@@ -235,10 +223,11 @@ println!("scale {:.3}, rms {:.3}px",
     frame.map().linear_scale(), frame.quality().rms_residual_px);
 
 // 3. 注册追踪目标：调用方自己的离屏渲染（纯像素，fidus 不收任何平台坐标）
-let target = TargetDescription {
-    template_logical: RgbaImage::from_raw(4, 4, vec![0; 4 * 4 * 4]),
-    initial_center: None,
-};
+//    渲染必须「可定位」：注册期会拒绝模板匹配锁不住的外观（渐变、纯色填充），
+//    它们会在任意位置给出高分。这与对比度无关——线性渐变对比度很高却完全
+//    无法定位（§11.1）。若确实没有更好的渲染，可显式降级换取尽力而为的追踪：
+//    `TargetDescription::new(img).tracking_ambiguous_appearance()`
+let target = TargetDescription::new(my_own_render());
 engine.register_target(target).expect("estimator accepts targets");
 
 // 4. 稳态追踪（L7 融合：L1 模板匹配 + L8 门控差分 → 常速度 Kalman）

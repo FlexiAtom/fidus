@@ -7,9 +7,9 @@
 //!   fidus' own captures.
 //! * **L8 EdgeSync** — *measurement primitive wired* (P2-b):
 //!   [`edge_sync::EdgeSync`] measures displaced target bboxes by gated
-//!   frame differencing; the fused estimator (L1 + L8 + L4 + EKF) that
+//!   frame differencing; the fused estimator (L1 + L8 + L4 + constant-velocity Kalman) that
 //!   consumes it lands with P2-c.
-//! * **L4 relative displacement** and **L7 EKF fusion** — P2-c.
+//! * **L4 relative displacement** and **L7 fusion** — P2-c.
 //!
 //! # Target registration (spec §3.2 / §6.1)
 //!
@@ -91,7 +91,7 @@ impl Estimator for NullEstimator {
         _frame: &CoordinateFrame,
     ) -> Result<ProbabilisticPosition, EstimateError> {
         Err(EstimateError::NotImplementedYet {
-            note: "L1/L8/EKF steady-state tracking is the P2 roadmap item",
+            note: "L1/L8/Kalman steady-state tracking is the P2 roadmap item",
         })
     }
 }

@@ -70,25 +70,26 @@ const MAX_SELF_SIMILARITY: f64 = 0.98;
 /// # Why decay, not an absolute level (measured, not guessed)
 ///
 /// Variance is *not* a proxy for localizability, which is the trap this
-/// check exists to avoid. Measured on 60×40 templates, luma std. dev. versus
-/// max NCC at a ≥2 px shift:
+/// check exists to avoid. Measured on 60×40 templates with the same sampling
+/// this function uses (max over `(r,0) (0,r) (r,r) (r,-r)` per radius):
 ///
-/// | template | std | r=2 | r=16 | verdict |
-/// |---|---|---|---|---|
-/// | linear gradient | **73.6** | 1.000 | 1.000 | unlocatable — high variance, zero information |
-/// | grating (fx=1, fy=2) | 60.1 | 0.980 | 0.194 | periodic but decays → usable |
-/// | solid block + thin border | 97.5 | 0.822 | 0.648 | weak texture, still locatable |
-/// | hash texture | 57.2 | 0.170 | 0.204 | excellent |
+/// | template | std | r=2 | r=4 | r=8 | r=16 | verdict |
+/// |---|---|---|---|---|---|---|
+/// | linear gradient | 73.6 | 1.000 | 1.000 | 1.000 | 1.000 | unlocatable |
+/// | grating (fx=1, fy=2) | 60.0 | 0.980 | 0.924 | 0.738 | 0.195 | periodic, decays → usable |
+/// | solid block + thin border | 97.5 | 0.822 | 0.711 | 0.692 | 0.648 | weak but locatable |
+/// | hash texture | 74.8 | 0.016 | 0.009 | 0.025 | 0.017 | excellent |
 ///
-/// A high-variance gradient is the *worst* case while a lower-variance hash
-/// pattern is the best, so any variance threshold is either useless or
-/// actively wrong. What separates them is whether self-similarity **falls
-/// off** with distance: a locatable template looks progressively less like
-/// itself as it slides, a pathological one does not.
+/// The gradient and the hash texture have **nearly identical variance**
+/// (73.6 vs 74.8) and opposite localizability (1.000 vs 0.025): variance has
+/// essentially no discriminating power here, so any threshold on it is
+/// useless or actively inverted. What separates them is self-similarity —
+/// and, for templates that start out high, whether it **falls off** with
+/// distance.
 ///
-/// A flat 0.65 plateau (the block case) passes because its *absolute* level
-/// is far from 1.0 — decay is only required of templates that start out
-/// highly self-similar.
+/// The block's 0.822 → 0.648 plateau passes because the decay requirement
+/// only applies above `near > 0.9`: its absolute level is already far enough
+/// from 1.0 that its peak is unambiguous.
 const MIN_SELF_SIMILARITY_DECAY: f64 = 0.1;
 
 /// Coarse candidates carried into the full-resolution refinement.
@@ -715,10 +716,13 @@ mod tests {
 
     #[test]
     fn genuinely_locatable_templates_are_accepted() {
-        // Hash texture: the best case, self-similarity near zero.
+        // Hash texture: the best case, self-similarity near zero. The bound
+        // is tight (measured ~0.025) rather than a loose "< 0.5": this table
+        // is quoted as evidence in spec §11.1, so a regression that degraded
+        // it to 0.4 must fail here instead of passing quietly.
         let hash = tpl_from(hash_luma);
         let s = localizability(&hash).expect("hash texture must be trackable");
-        assert!(s < 0.5, "hash texture self-similarity {s}");
+        assert!(s < 0.1, "hash texture self-similarity {s}, expected ~0.025");
 
         // A grating is *periodic* — highly self-similar at 2 px (~0.98) —
         // but it decorrelates with distance (~0.19 at 16 px), so its peak is
