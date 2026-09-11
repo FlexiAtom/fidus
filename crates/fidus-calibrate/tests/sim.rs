@@ -275,8 +275,15 @@ fn recovers_known_mapping_end_to_end() {
     let q = frame.quality();
     assert_eq!(q.independent_passes, 2);
     assert_eq!(q.sample_count, 4);
-    assert!(q.verification_max_err_px <= 1.5, "verify = {}", q.verification_max_err_px);
-    assert!(q.consistency_max_err_px <= 1.5, "consistency = {}", q.consistency_max_err_px);
+    // Bounds are deliberately tighter than the calibrator's own rejection
+    // gates (1.5 px each). Asserting at the gate value only restates what the
+    // calibrator already enforces — it would hold equally at 0.001 and 1.499,
+    // and so cannot notice quality decaying toward the threshold. That is how
+    // the fractional-scale degradation stayed invisible here despite this
+    // test already running at scale 1.25; see
+    // `integer_scales_are_exact_and_fractional_ones_stay_bounded`.
+    assert!(q.verification_max_err_px < 0.9, "verify = {}", q.verification_max_err_px);
+    assert!(q.consistency_max_err_px < 1.2, "consistency = {}", q.consistency_max_err_px);
     assert!(io.destroyed, "projector torn down after success");
 }
 
@@ -406,4 +413,82 @@ fn no_prior_picks_the_largest_coherent_change() {
         .expect("largest change wins without prior");
     let (x0, y0, x1, y1) = marker_rect(&screen, pos, &style);
     assert_eq!((det.bbox.x0, det.bbox.y0, det.bbox.x1, det.bbox.y1), (x0, y0, x1, y1));
+}
+
+
+// ---------------------------------------------------------------------------
+// Fractional-scale quantization (measured on live Niri, 2026-09).
+// ---------------------------------------------------------------------------
+
+/// Integer output scales must calibrate *exactly*; fractional ones must not
+/// silently drift past the point where the consistency gate has no headroom
+/// left.
+///
+/// **Why this test exists**: `recovers_known_mapping_end_to_end` already ran
+/// at scale 1.25 and asserted `consistency <= 1.5` — the *rejection
+/// threshold*. That assertion passes whether the true value is 0.001 or
+/// 1.499, so it could never notice the degradation this test pins down
+/// (AGENTS §5: an assertion that encodes the threshold instead of the
+/// expected behaviour ossifies whatever the code happens to do).
+///
+/// **What it guards**: fidus commands marker positions in whole logical
+/// pixels (`crosshair.rs`, to match the backend's rounding), so the
+/// compositor lands them on `round(L·scale)` — up to 0.5 physical pixels off.
+/// At integer scales `round(L·s) == L·s`, so the residual is necessarily
+/// zero; at fractional scales it is systematic, not noise. Live Niri measured
+/// rms 0.000 / 0.089 / 0.141 / 0.208 / 0.000 px at scale 1 / 1.25 / 1.5 /
+/// 1.75 / 2, and this simulation reproduces it (0.000 / 0.160 / 0.147 /
+/// 0.000).
+///
+/// **Failure mode**: if a future change makes integer scales inexact, the
+/// projection path has acquired a new rounding error. If the fractional
+/// bound is exceeded, the error source grew and the `consistency` gate —
+/// already down to ~26% headroom live — will start rejecting good
+/// calibrations.
+///
+/// See `docs/measurements/l9-fractional-scaling.md` and spec §4.1.
+#[test]
+fn integer_scales_are_exact_and_fractional_ones_stay_bounded() {
+    for scale in [1.0, 2.0] {
+        let mut io = FakeIo::new(
+            Screen { phys_w: 1280, phys_h: 800, panel_h: 0.0, scale },
+            Noise::Clean,
+        );
+        let q = *calibrator(7)
+            .calibrate(&mut io)
+            .unwrap_or_else(|e| panic!("scale {scale} must calibrate: {e}"))
+            .quality();
+        assert_eq!(
+            (q.rms_residual_px, q.max_residual_px), (0.0, 0.0),
+            "scale {scale}: integer scales land on exact pixels, so residuals \
+             must be exactly zero; got rms={} max={}",
+            q.rms_residual_px, q.max_residual_px,
+        );
+        assert_eq!((q.verification_max_err_px, q.consistency_max_err_px), (0.0, 0.0));
+    }
+
+    for scale in [1.25, 1.5] {
+        let mut io = FakeIo::new(
+            Screen { phys_w: 1280, phys_h: 800, panel_h: 0.0, scale },
+            Noise::Clean,
+        );
+        let q = *calibrator(7)
+            .calibrate(&mut io)
+            .unwrap_or_else(|e| panic!("scale {scale} must still calibrate: {e}"))
+            .quality();
+        // Quantization is bounded by half a physical pixel per marker, so the
+        // fitted residual cannot reach 0.5; anything beyond that is a new bug.
+        assert!(
+            q.rms_residual_px > 0.0 && q.rms_residual_px < 0.5,
+            "scale {scale}: expected small systematic quantization residual, got {}",
+            q.rms_residual_px,
+        );
+        // Live worst case was 1.114 against a 1.5 gate. Hold the simulation to
+        // a tighter bound so regressions surface here, not on a user's laptop.
+        assert!(
+            q.consistency_max_err_px < 1.2,
+            "scale {scale}: consistency {} is eating the gate's headroom",
+            q.consistency_max_err_px,
+        );
+    }
 }

@@ -26,4 +26,12 @@
 
 | 提案 | 状态 | 结论 |
 |---|---|---|
-| [P3 · L10 GradientField](P3-L10-gradient-field.md) | ✅ **已裁决：否决** | 实测推翻规格 §4.2 的方案骨架（原理自相矛盾）。规格已重写，代码保留诚实的 `FeatureDisabled`。 |
+| [P3 · L10 GradientField](P3-L10-gradient-field.md) | ✅ **已裁决：三个方向全部否决** | 两轮实测：①「对数螺旋 + 锁主频」自相矛盾；②实机发现 L9 的真实短板在**投射端取整**（分数缩放 rms 0.308px），精修类方案不对症。规格 §4.2 已重写。 |
+
+## 实测记录
+
+提案与规格引用的实机数据存放在 [`docs/measurements/`](../measurements/)，脚本在 [`scripts/`](../../scripts/)。
+
+| 记录 | 结论 |
+|---|---|
+| [L9 分数缩放与旋转精度](../measurements/l9-fractional-scaling.md) | 旋转零误差；**整数缩放完美、分数缩放系统性退化**，成因是逻辑→物理取整 |
