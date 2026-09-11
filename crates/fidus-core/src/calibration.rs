@@ -10,7 +10,22 @@ pub enum CalibrationMethod {
     /// L9 Crosshair — flagship calibrator, requires layer-shell (wlroots-like
     /// compositors: Niri / Sway / Hyprland, KDE, partial GNOME).
     Crosshair,
-    /// L10 GradientField — experimental, feature-gated (`gradient-field`).
+    /// L10 GradientField — **rejected**, see spec §4.2.
+    ///
+    /// The design (log-spiral grid, lock the FFT fundamental, read scale from
+    /// the frequency and offset from the phase) is self-contradictory: the
+    /// spiral removes the whole-period ambiguity precisely by making local
+    /// frequency vary with position, which is the same thing as having no
+    /// fundamental to lock (measured sharpness 3.4–6.8 for every k from 10 to
+    /// 80, against 250.9 for a regular grating). A regular grating does have a
+    /// sharp fundamental and recovers offset to 0.034 px, but phase is mod 2π
+    /// and so cannot say *which* period — 34 equivalent solutions on a 1366 px
+    /// screen.
+    ///
+    /// Kept as a variant so the gate can keep reporting it honestly as
+    /// unavailable rather than pretending the level never existed. The gate
+    /// returns `FeatureDisabled` and the builder returns `None`; nothing
+    /// depends on it.
     GradientField,
     /// L0 Anchor — the universal fallback: four color sentinels projected at
     /// the corners simultaneously. Needs only the two primitives every

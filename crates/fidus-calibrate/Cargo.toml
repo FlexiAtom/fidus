@@ -7,7 +7,8 @@ rust-version.workspace = true
 license.workspace = true
 
 [features]
-# L10 GradientField stays a research item (spec §4.2) and must be opted into.
+# L10 GradientField was rejected (spec §4.2: the design is self-contradictory).
+# The flag is kept as an inert no-op so existing build configs keep working.
 gradient-field = []
 
 [dependencies]

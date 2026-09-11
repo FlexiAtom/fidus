@@ -26,4 +26,4 @@
 
 | 提案 | 状态 | 结论 |
 |---|---|---|
-| [P3 · L10 GradientField](P3-L10-gradient-field.md) | 🔶 **待裁决** | 实测推翻了规格 §4.2 的方案骨架；建议不按原设计实现，给出三个候选方向 |
+| [P3 · L10 GradientField](P3-L10-gradient-field.md) | ✅ **已裁决：否决** | 实测推翻规格 §4.2 的方案骨架（原理自相矛盾）。规格已重写，代码保留诚实的 `FeatureDisabled`。 |

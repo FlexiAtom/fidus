@@ -126,7 +126,7 @@ $ FIDUS_BACKEND=x11 cargo run -p fidus --bin fidus-calibrate
 | **P0** | 架构地基：类型系统、三层 trait、Gate、概率池纯净性 | ✅ 完成 |
 | **P1** | L9 Crosshair 校准器 + teardown 生命周期 | ✅ 完成，Niri 实机验证通过 |
 | **P2** | C 层增量追踪：L1 Fingerprint + 运行时 target 注册（P2-a）→ L8 EdgeSync + MotionGate（P2-b）→ L4/L7 融合，常速度 KF（P2-c）→ L0 Anchor 通用校准器 + X11 backend（P2-d）→ ScreenClassifier 动态壁纸自动检测（P2-e）→ 审查修复 + `SolvedMap` 坐标注入封印（P2-f）→ 目标可定位性准入 + 逃生门（P2-g）→ 文档整合（P2-h） | ✅ 完成 |
-| **P3** | L10 GradientField（feature-gated 实验项） | ⬜ 研究项，未实现 |
+| **P3** | ~~L10 GradientField~~ — 提案阶段实测**推翻**原设计（原理自相矛盾），目标待定 | 🔶 见[提案](./docs/proposals/) |
 
 当前可在 Niri / Sway / Hyprland / KDE Plasma 等支持 `zwlr_layer_shell_v1` + `zwlr_screencopy_manager_v1` 的 Wayland 合成器上以 L9 校准，在真 X server 上以 L0 校准（后端由 `FidusBuilder` 自动选择：layer-shell 优先，其次 X11），并可注册调用方自己的渲染模板做稳态追踪：L1 模板匹配 + L8 门控差分融合进常速度 Kalman 跟踪器（L7，P2-c）——拖拽跟随、动画期滑行（置信度 0 的标注信念而非伪造测量）、丢失后重捕获。Windows、macOS、GNOME（portal 路径）的 backend 尚未实现。
 
@@ -167,7 +167,7 @@ crates/
 │                                  engine.rs     Calibrator/Estimator trait + FidusEngine
 ├── fidus-backend-wayland-layer/ 仅适配基础原语：layer-shell 投影 + wlr-screencopy 截屏
 ├── fidus-backend-x11/           仅适配基础原语：override-redirect 窗口投影（每标记一窗）+ GetImage(root) 截屏
-├── fidus-calibrate/             L9 Crosshair + L0 Anchor 校准器；共享 detect.rs 差分检测器（L10 占位）
+├── fidus-calibrate/             L9 Crosshair + L0 Anchor 校准器；共享 detect.rs 差分检测器
 ├── fidus-estimate/              C 层估计器：L1 Fingerprint + L8 EdgeSync/MotionGate + L4/L7 融合（常速度 KF）+ ScreenClassifier
 └── fidus/                       伞 crate：FidusBuilder 后端选择（Auto/WaylandLayer/X11）+ 冒烟测试二进制
 ```
@@ -259,7 +259,7 @@ cargo clippy   # 零警告
 - 动态壁纸探测（P2-e 已落地）：`FidusBuilder::build` 默认跑一次 `ScreenClassifier`（3 对相隔 200ms 的截屏、中心 84% 区域、步长 4 采样，取**最差**一对；> 15% 判动态）自动填充 `is_dynamic_wallpaper`，调用方显式提供时跳过；Gate 据此把 L9 降为 `Degraded{0.85}`（差分检测对动态背景鲁棒，代价是重试更多而非精度更低）、L0 降为 `Degraded{0.6}`。实机读数：静态桌面 ~0.0001–0.0005，全屏动画 0.22–0.29，局部动画 0.08–0.17（正是"取最差一对"的理由）。它分不清"壁纸在动"和"窗口里在播视频"——但 Gate 问的是"基线与捕获之间背景会不会变"，两者答案相同，所以不区分。
 - **L0 在 rootless XWayland 上不可用**（取证五：`GetImage(root)` → `BadMatch`，连接时即诚实拒绝）。
 - **Windows / macOS 后端未实现**：这是**缺 backend，不是缺设计**。L0 Anchor 校准器、Gate 的能力判定、整条 C 层估计管线都与平台无关，需要的只是各约 300 行的"投射 + 截屏"原语适配（Windows: 分层窗口 + BitBlt；macOS: `NSPanel` + `CGWindowListCreateImage`，另需屏幕录制权限状态机 —— `PermissionState` 已预留 `RequiresRestart`，因为 macOS 授权后进程必须重启）。
-- **L10 GradientField**：Gate 诚实返回 `FeatureDisabled`。
+- **L10 GradientField**：**已否决**——提案阶段实测表明「对数螺旋 + 锁定主频」自相矛盾，且相位法无法独立消歧（见 [spec §4.2](./docs/spec.md)）。Gate 诚实返回 `FeatureDisabled`。
 - **可定位性检查是固定半径采样**（2/4/8/16px）：周期恰好落在采样半径之间的图案（如在 6px 自相似但 4px/8px 不）可能漏过。这被**容纳**而非致命——此类模板在真实位置仍有正确的峰，歧义只存在于固定偏移的等优候选之间，L7 的运动模型会把由此产生的跳变判为与轨迹不符。必须拦的渐变与近匀色**在所有半径上都歧义**，不可能漏过。
 - **GNOME（无 layer-shell）**：需要 `fidus-backend-wayland-portal`，未实现。
 - **Y_INVERT**：screencopy 的 Y 反转已处理并有单测，但仅在实机（Niri 不置位该标志）验证过非反转路径。
