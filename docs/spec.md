@@ -142,7 +142,7 @@ query():
 
 - **L9 Crosshair**（旗舰）：基于 layer-shell 投射已知位置标记，视觉反推映射
 - **L10 GradientField**（实验性，feature-gated）：频域编码全场坐标
-- **L0 Anchor**（通用兜底）：1×1 像素找色，X11/Windows 可用
+- **L0 Anchor**（通用兜底）：四角哨兵方块（默认 8×8），**基线差分 ∧ 颜色**检测；只要后端能"同时投射多个标记 + 截屏"即可用
 
 ### 3.2 C 层 · Estimator（估计器）
 
@@ -162,17 +162,25 @@ query():
 
 ### 3.4 调用方的职责（fidus 之外）
 
+fidus **不是兜底路径，它就是路径**。类型名从 `FallbackEngine` 改为 `FidusEngine`（P2-h）正是为此：旧名字来自"桌宠在正经 API 失败后的最后手段"那个时代，而 §2.1 已经证明**没有那个可退回的正经 API**。
+
+调用方**可以**在自己那侧保留一条原生快速通道，但那是**调用方的选择与调用方的风险**，与 fidus 无关：
+
 ```
 启动:
-  rect = 调用方自己调 native API        // fidus 不参与
-  if rect 可信:                          // X11/Windows 上通常可信
-      return rect                        // 快速通道，不经过 fidus
+  // 可选：调用方自己调 native API，fidus 完全不参与、也不想知道结果
+  if 调用方自行判定平台坐标够用:
+      用调用方自己的路径              // 风险自负，见下方警告
   else:
-      // Wayland 下 API 返回 (0,0)/不触发/不可信 → 才实例化 fidus
-      let engine = FallbackEngine::new(env);   // env 只描述环境，不含坐标
+      let engine = FidusEngine::new(parts);  // parts 只含能力，不含坐标
       engine.calibrate();
+      engine.register_target(...);
       loop { use engine.estimate(); }
 ```
+
+> **两条路径之间的结果不可混算。** 原生 API 给的是布尔型的"成功/失败"，fidus 给的是概率型的置信度——量纲不同，加权平均没有意义（§2.2、§6.1）。调用方要么用这条，要么用那条，**不要把两者融合**。
+>
+> **"通常可信"是个陷阱。** 即使在 X11/Windows 上：Windows 多屏混合 DPI 下 `GetWindowRect` 会偏；XWayland 里 X11 路径整条断掉（§2.1 取证五）。调用方若走快速通道，验证责任在调用方自己。
 
 **关键：fidus 的概率池从头到尾只见过视觉/交互信号，从未见过 native 坐标值。污染的入口在类型层面封死。**
 
@@ -235,7 +243,9 @@ query():
 
 ### 4.3 L0 Anchor · 通用兜底校准器
 
-创建 4 个 2×2 像素纯色方块（颜色取高饱和冷门色），锚定虚拟屏幕四角。每次校准随机打乱“颜色→角点”的映射并立即销毁重建，至少通过 2 轮独立采样验证映射一致性，并结合几何矩形约束确认，方可输出 CoordinateFrame。
+创建 4 个纯色哨兵方块（颜色取高饱和冷门色；尺寸 2×2 为配置下限，**默认 8×8**），锚定虚拟屏幕四角。每次校准随机打乱"颜色→角点"的映射并立即销毁重建，至少通过 2 轮独立采样验证映射一致性，并结合几何矩形约束确认，方可输出 CoordinateFrame。
+
+> **注意**：单纯"找色"不足以检测哨兵——那是 P2-d 修掉的缺陷。正确做法是**基线差分 ∧ 颜色**，见下方实现细化第一条。
 
 > **实现细化（P2-d，2026-09-09）**：
 > - **检测 = 基线差分 ∧ 颜色**，而非单纯找色。L0 没有 L9 的"置顶 overlay"保证，纯找色会被壁纸里的同色块欺骗；先截"标记隐藏"基线，再要求哨兵像素既*变化*又*带哨兵色*，静态同色块在差分中抵消。只有在两帧之间移动的诱饵能干扰，而那以歧义/未检出进入重试——与 L9 的原则一致：干扰只能让单次测量失效，无法伪造。
@@ -409,9 +419,9 @@ threshold = min( max(baseline × 3, 15%), 50% )
 `fidus-core` 的公开 API **不含任何坐标类 native 输入**：
 
 ```rust
-pub struct FallbackEngine { /* calibrator / estimator / gate / io_factory / frame */ }
+pub struct FidusEngine { /* calibrator / estimator / gate / io_factory / frame */ }
 
-impl FallbackEngine {
+impl FidusEngine {
     // EngineParts 由平台胶水层装配；其中不含任何坐标值
     pub fn new(parts: EngineParts) -> Self;
 

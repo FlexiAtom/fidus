@@ -2,7 +2,7 @@
 
 use fidus_calibrate::{AnchorCalibrator, AnchorConfig, CrosshairCalibrator, CrosshairConfig};
 use fidus_core::calibration::CalibrationMethod;
-use fidus_core::engine::{Calibrator, EngineParts, FallbackEngine, InitError};
+use fidus_core::engine::{Calibrator, EngineParts, FidusEngine, InitError};
 use fidus_core::env::EnvironmentContext;
 use fidus_core::gate::{Gate, ProbeGate};
 use fidus_core::io::IoFactory;
@@ -23,7 +23,7 @@ pub enum BackendChoice {
     X11,
 }
 
-/// Builder for a [`FallbackEngine`], with caller-supplied environment
+/// Builder for a [`FidusEngine`], with caller-supplied environment
 /// knowledge and calibrator tuning.
 #[derive(Debug)]
 pub struct FidusBuilder {
@@ -93,14 +93,14 @@ impl FidusBuilder {
     /// assembles the engine.
     ///
     /// The engine is returned even when the gate answers "unavailable" for
-    /// every calibrator — callers inspect [`FallbackEngine::gate`]
+    /// every calibrator — callers inspect [`FidusEngine::gate`]
     /// themselves (spec §5.4). Only a missing backend is an error.
-    pub fn build(self) -> Result<FallbackEngine, InitError> {
+    pub fn build(self) -> Result<FidusEngine, InitError> {
         self.build_with(BackendChoice::default())
     }
 
     /// Like [`build`](Self::build) with an explicit backend choice.
-    pub fn build_with(self, choice: BackendChoice) -> Result<FallbackEngine, InitError> {
+    pub fn build_with(self, choice: BackendChoice) -> Result<FidusEngine, InitError> {
         match choice {
             BackendChoice::Auto => self.build_auto(),
             BackendChoice::WaylandLayer => self.build_wayland_layer(),
@@ -108,7 +108,7 @@ impl FidusBuilder {
         }
     }
 
-    fn build_auto(self) -> Result<FallbackEngine, InitError> {
+    fn build_auto(self) -> Result<FidusEngine, InitError> {
         let mut failures: Vec<String> = Vec::new();
         #[cfg(feature = "wayland-layer")]
         match Self::connect_wayland_layer() {
@@ -126,7 +126,7 @@ impl FidusBuilder {
         Err(InitError::ProbeFailed(failures.join("; ")))
     }
 
-    fn build_wayland_layer(self) -> Result<FallbackEngine, InitError> {
+    fn build_wayland_layer(self) -> Result<FidusEngine, InitError> {
         #[cfg(feature = "wayland-layer")]
         {
             let backend = Self::connect_wayland_layer()?;
@@ -136,7 +136,7 @@ impl FidusBuilder {
         Err(InitError::ProbeFailed("compiled without the `wayland-layer` feature".into()))
     }
 
-    fn build_x11(self) -> Result<FallbackEngine, InitError> {
+    fn build_x11(self) -> Result<FidusEngine, InitError> {
         #[cfg(feature = "x11")]
         {
             let backend = Self::connect_x11()?;
@@ -172,7 +172,7 @@ impl FidusBuilder {
     }
 
     /// Gate → calibrator selection → engine.
-    fn assemble(self, mut backend: ProbedBackend) -> Result<FallbackEngine, InitError> {
+    fn assemble(self, mut backend: ProbedBackend) -> Result<FidusEngine, InitError> {
         let mut env = EnvironmentContext::merge(backend.env, self.caller_env);
 
         // Automatic dynamic-wallpaper knowledge (v0.4 L8 ScreenClassifier):
@@ -212,7 +212,7 @@ impl FidusBuilder {
             }
         }
 
-        Ok(FallbackEngine::new(EngineParts {
+        Ok(FidusEngine::new(EngineParts {
             gate: Box::new(gate),
             calibrator,
             // L7 fusion: L1 template matching + L8 gated differencing into a

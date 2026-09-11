@@ -41,7 +41,7 @@ impl ProbabilisticPosition {
     }
 }
 
-/// Errors from [`crate::engine::FallbackEngine::estimate`].
+/// Errors from [`crate::engine::FidusEngine::estimate`].
 #[derive(Debug, thiserror::Error)]
 pub enum EstimateError {
     /// No calibrated coordinate frame exists yet; call `calibrate()` first.

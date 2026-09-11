@@ -185,7 +185,7 @@ pub enum Unlocatable {
     /// to survive a busy background regardless.
     TooSmall,
     /// Flat: no matchable structure at all (a solid color, or noise below
-    /// the quantization floor). See [`MIN_VARIANCE_PER_SAMPLE`].
+    /// the quantization floor). See `MIN_VARIANCE_PER_SAMPLE`.
     Featureless,
     /// The template looks like itself under translation, so the NCC peak is
     /// not a peak: the match position is arbitrary within the ambiguous
@@ -213,7 +213,7 @@ impl core::fmt::Display for Unlocatable {
 /// Whether `template` can be located at all, and how distinctly.
 ///
 /// Returns the **worst** (highest) self-similarity across
-/// [`SELF_SIMILARITY_RADII`] on success: 0 means every shifted copy is
+/// `SELF_SIMILARITY_RADII` on success: 0 means every shifted copy is
 /// uncorrelated (ideal), values approaching 1 mean the match position is
 /// increasingly arbitrary.
 ///
@@ -405,7 +405,7 @@ fn ncc(
 /// Finds `template` inside `roi` of `frame`.
 ///
 /// Phase 1 scans the ROI on a genuine image pyramid (both frame and
-/// template box-blurred and downsampled by [`COARSE_STEP`]); phase 2 refines
+/// template box-blurred and downsampled by `COARSE_STEP`); phase 2 refines
 /// the top few candidates at full resolution; phase 3 fits a 1D parabola per
 /// axis for subpixel precision.
 pub fn match_template(frame: &Frame, template: &RgbaImage, roi: SearchRoi) -> Option<TemplateMatch> {

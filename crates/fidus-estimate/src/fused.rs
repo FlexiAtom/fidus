@@ -68,11 +68,11 @@ pub struct FusedEstimator {
     /// aggressively at the cost of noisier coasting.
     pub process_noise: f64,
     /// Measurement variance at confidence 1.0, px². Read by
-    /// [`Self::r_of`]; values that are not finite and non-negative fall back
+    /// `r_of`; values that are not finite and non-negative fall back
     /// to the default.
     pub r_min_px2: f64,
     /// Measurement variance at confidence 0.0, px². Read by
-    /// [`Self::r_of`]; same validation as [`Self::r_min_px2`].
+    /// `r_of`; same validation as [`Self::r_min_px2`].
     pub r_max_px2: f64,
     /// Extra search margin around the predicted region, in capture pixels.
     pub search_margin_px: f64,

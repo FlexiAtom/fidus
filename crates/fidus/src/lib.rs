@@ -98,7 +98,7 @@ pub mod prelude {
     //! Everything a typical caller needs.
 
     pub use crate::builder::{BackendChoice, FidusBuilder};
-    pub use fidus_core::engine::FallbackEngine;
+    pub use fidus_core::engine::FidusEngine;
     pub use fidus_core::prelude::*;
     pub use fidus_calibrate::{AnchorCalibrator, AnchorConfig, CrosshairCalibrator, CrosshairConfig};
     pub use fidus_estimate::{FingerprintEstimator, FusedEstimator};

@@ -1,4 +1,4 @@
-//! The three-layer traits and the [`FallbackEngine`] shell (spec §3, §6).
+//! The three-layer traits and the [`FidusEngine`] shell (spec §3, §6).
 
 use crate::calibration::{CalibrationError, CalibrationMethod};
 use crate::env::EnvironmentContext;
@@ -67,7 +67,7 @@ pub enum InitError {
     Backend(String),
 }
 
-/// Assembled parts for [`FallbackEngine::new`]; built by platform glue such
+/// Assembled parts for [`FidusEngine::new`]; built by platform glue such
 /// as the `fidus` umbrella crate.
 pub struct EngineParts {
     /// Gate answering availability queries.
@@ -87,7 +87,12 @@ pub struct EngineParts {
 /// coordinates, [`CalibrationIo`] accepts no coordinates, and no method of
 /// this type accepts a coordinate — there is simply no pathway for a native
 /// coordinate to reach the probability pool.
-pub struct FallbackEngine {
+///
+/// *Formerly `FallbackEngine`*: the old name came from the era when this was
+/// a desktop pet's last resort behind a "proper" platform API. Spec §2.1
+/// established there is no such API to fall back from — projecting markers
+/// and solving the map is not the fallback path, it is the only path.
+pub struct FidusEngine {
     gate: Box<dyn Gate>,
     calibrator: Option<Box<dyn Calibrator>>,
     estimator: Box<dyn Estimator>,
@@ -95,7 +100,7 @@ pub struct FallbackEngine {
     frame: Option<CoordinateFrame>,
 }
 
-impl FallbackEngine {
+impl FidusEngine {
     /// Assembles an engine from its parts.
     pub fn new(parts: EngineParts) -> Self {
         Self {

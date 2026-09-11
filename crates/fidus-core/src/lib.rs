@@ -24,8 +24,8 @@
 //! ## Crate layout (spec §7)
 //!
 //! * `fidus-core` (this crate): type system, the three-layer traits
-//!   ([`Calibrator`]/[`Estimator`]/[`Gate`]), the calibration I/O session
-//!   abstraction, and the [`FallbackEngine`] shell.
+//!   ([`engine::Calibrator`]/[`engine::Estimator`]/[`gate::Gate`]), the
+//!   calibration I/O session abstraction, and the [`engine::FidusEngine`] shell.
 //! * `fidus-backend-*`: adapters for the basic compositor primitives only
 //!   (projection + capture). They never wrap "read window coordinates" APIs.
 //! * `fidus-calibrate`: L0/L9/L10 calibration strategies.
@@ -34,7 +34,7 @@
 //!
 //! ## Coordinate semantics
 //!
-//! A successful calibration yields a [`CoordinateFrame`]: an affine map between
+//! A successful calibration yields a [`frame::CoordinateFrame`]: an affine map between
 //!
 //! * *logical* space — layer-shell usable-area coordinates of the calibrated
 //!   output (the same space layer-shell margins are expressed in), and
@@ -60,7 +60,7 @@ pub mod target;
 pub mod prelude {
     pub use crate::calibration::{CalibrationError, CalibrationMethod, CalibrationStatus, UnsupportedReason};
     pub use crate::coord::{AffineTransform, BoundingBox, LogicalPoint, PhysicalPoint, Residuals, SolveError};
-    pub use crate::engine::{EngineParts, FallbackEngine, InitError};
+    pub use crate::engine::{EngineParts, FidusEngine, InitError};
     pub use crate::env::{CompositorKind, EnvironmentContext, PermissionState, PermissionType};
     pub use crate::estimate::{EstimateError, MeasurementSource, ProbabilisticPosition};
     pub use crate::frame::{CalibrationQuality, CoordinateFrame};

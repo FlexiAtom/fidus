@@ -124,12 +124,12 @@ $ FIDUS_BACKEND=x11 cargo run -p fidus --bin fidus-calibrate
 |---|---|---|
 | **P0** | 架构地基：类型系统、三层 trait、Gate、概率池纯净性 | ✅ 完成 |
 | **P1** | L9 Crosshair 校准器 + teardown 生命周期 | ✅ 完成，Niri 实机验证通过 |
-| **P2** | C 层增量追踪：L1 Fingerprint + 运行时 target 注册 ✅（P2-a）→ L8 EdgeSync + MotionGate ✅（P2-b）→ L4/L7 融合（常速度 KF）✅（P2-c）→ L0 Anchor 通用兜底校准器 + X11 backend ✅（P2-d） | ✅ 完成 |
+| **P2** | C 层增量追踪：L1 Fingerprint + 运行时 target 注册（P2-a）→ L8 EdgeSync + MotionGate（P2-b）→ L4/L7 融合，常速度 KF（P2-c）→ L0 Anchor 通用校准器 + X11 backend（P2-d）→ ScreenClassifier 动态壁纸自动检测（P2-e）→ 审查修复 + `SolvedMap` 坐标注入封印（P2-f）→ 目标可定位性准入 + 逃生门（P2-g）→ 文档整合（P2-h） | ✅ 完成 |
 | **P3** | L10 GradientField（feature-gated 实验项） | ⬜ 研究项，未实现 |
 
 当前可在 Niri / Sway / Hyprland / KDE Plasma 等支持 `zwlr_layer_shell_v1` + `zwlr_screencopy_manager_v1` 的 Wayland 合成器上以 L9 校准，在真 X server 上以 L0 校准（后端由 `FidusBuilder` 自动选择：layer-shell 优先，其次 X11），并可注册调用方自己的渲染模板做稳态追踪：L1 模板匹配 + L8 门控差分融合进常速度 Kalman 跟踪器（L7，P2-c）——拖拽跟随、动画期滑行（置信度 0 的标注信念而非伪造测量）、丢失后重捕获。Windows、macOS、GNOME（portal 路径）的 backend 尚未实现。
 
-> **fidus 是全平台统一兜底库，不是 Wayland 专用工具。**
+> **fidus 是全平台定位库，不是 Wayland 专用工具，也不是谁的"兜底方案"。**
 >
 > 上一节的取证说明零信任是被 Wayland **逼**出来的；但"起因是 Wayland"不等于"只服务 Wayland"。Wayland 是**最极端的一个实例**——极端到连提问的入口都没有——而不是唯一的一个：
 >
@@ -163,7 +163,7 @@ crates/
 │                                  frame.rs      CoordinateFrame（校准产物，C 层的输入）
 │                                  gate.rs       Gate trait + ProbeGate（§5 能力探测）
 │                                  io.rs         CalibrationIo 会话（仅有的两个原语）
-│                                  engine.rs     Calibrator/Estimator trait + FallbackEngine
+│                                  engine.rs     Calibrator/Estimator trait + FidusEngine
 ├── fidus-backend-wayland-layer/ 仅适配基础原语：layer-shell 投影 + wlr-screencopy 截屏
 ├── fidus-backend-x11/           仅适配基础原语：override-redirect 窗口投影（每标记一窗）+ GetImage(root) 截屏
 ├── fidus-calibrate/             L9 Crosshair + L0 Anchor 校准器；共享 detect.rs 差分检测器（L10 占位）
