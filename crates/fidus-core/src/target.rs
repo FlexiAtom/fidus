@@ -91,6 +91,48 @@ impl RgbaImage {
     }
 }
 
+/// How to handle a target whose appearance cannot be reliably located.
+///
+/// # Why an opt-in and not a flag that silences the check
+///
+/// Some appearances are genuinely untrackable: a linear gradient correlates
+/// 1.000 with a shifted copy of itself, so template matching returns a
+/// confident score at an *arbitrary* position. The default is to refuse such
+/// a target outright, because a fabricated position entering the pool is the
+/// exact failure spec §6.1 exists to prevent.
+///
+/// But refusal is not always the caller's best option: a consumer that has
+/// no better render available may prefer a *degraded, honestly-labelled*
+/// track over none at all. That is what [`Self::TrackWithReducedConfidence`]
+/// is for — and note what it does **not** do. It never skips the check and it
+/// never lets a fabricated position look trustworthy: measurements from an
+/// ambiguous template are emitted with their confidence scaled down by how
+/// ambiguous the template actually measured, so L7 fusion and the Kalman
+/// filter weight them accordingly, and a caller watching `confidence` sees
+/// the degradation. Escaping the refusal costs credibility, not honesty.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UntrackablePolicy {
+    /// Refuse registration with `EstimateError::UntrackableTarget`.
+    ///
+    /// The default: an untrackable appearance is a caller bug that is far
+    /// cheaper to fix at registration than to diagnose later from a track
+    /// that wanders for reasons nothing reports.
+    #[default]
+    Refuse,
+    /// Accept the target, but permanently scale down the confidence of every
+    /// measurement derived from it.
+    ///
+    /// The caller is asserting "I know this render is ambiguous and I want a
+    /// best-effort track anyway". fidus keeps its side of spec §6.1 by making
+    /// the resulting uncertainty explicit rather than hiding it: nothing in
+    /// the pool is fabricated, it is merely *labelled as weak*.
+    ///
+    /// *Failure mode*: a caller that ignores `confidence` and treats every
+    /// position as exact gets a wandering target. Contained only by
+    /// documentation — a caller that opts in has explicitly taken this on.
+    TrackWithReducedConfidence,
+}
+
 /// What the estimator should track.
 ///
 /// The template is the caller's **own offscreen render** of the target — a
@@ -109,4 +151,36 @@ pub struct TargetDescription {
     /// This is the caller's own belief about its own drawing — it is not, and
     /// cannot be, a value read from a platform window API.
     pub initial_center: Option<LogicalPoint>,
+    /// What to do when the appearance cannot be reliably located.
+    ///
+    /// Defaults to [`UntrackablePolicy::Refuse`]; opting out has to be
+    /// written down at the call site, which is the point.
+    pub untrackable_policy: UntrackablePolicy,
+}
+
+impl TargetDescription {
+    /// A target tracked under the default policy (refuse if untrackable).
+    pub fn new(template_logical: RgbaImage) -> Self {
+        TargetDescription {
+            template_logical,
+            initial_center: None,
+            untrackable_policy: UntrackablePolicy::Refuse,
+        }
+    }
+
+    /// Sets the caller's belief about where the target currently is.
+    pub fn with_initial_center(mut self, center: LogicalPoint) -> Self {
+        self.initial_center = Some(center);
+        self
+    }
+
+    /// Opts into best-effort tracking of an ambiguous appearance, accepting
+    /// reduced confidence on every resulting measurement.
+    ///
+    /// Read [`UntrackablePolicy::TrackWithReducedConfidence`] before using
+    /// this: prefer supplying a more distinctive render when one exists.
+    pub fn tracking_ambiguous_appearance(mut self) -> Self {
+        self.untrackable_policy = UntrackablePolicy::TrackWithReducedConfidence;
+        self
+    }
 }

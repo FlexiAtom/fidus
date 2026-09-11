@@ -34,15 +34,36 @@
 //!
 //! // 3. Register what to track: the caller's own offscreen render
 //! //    (pure pixels — fidus never accepts a platform coordinate).
-//! let target = TargetDescription {
-//!     template_logical: RgbaImage::from_raw(4, 4, vec![0; 4 * 4 * 4]),
-//!     initial_center: None,
-//! };
+//! //
+//! //    The render has to be *locatable*. Registration refuses appearances
+//! //    that template matching cannot pin down — a gradient or a flat fill
+//! //    correlates with a shifted copy of itself, so NCC reports a confident
+//! //    score at an arbitrary position. Note this is not about contrast: a
+//! //    linear gradient has plenty of it and is still unlocatable.
+//! let target = TargetDescription::new(my_own_render());
+//!
+//! //    If no more distinctive render exists, opt into a best-effort track
+//! //    whose confidence is capped by the measured ambiguity:
+//! //    `TargetDescription::new(img).tracking_ambiguous_appearance()`.
 //! engine.register_target(target).expect("estimator accepts targets");
 //!
 //! // 4. Steady-state tracking (L1 Fingerprint, wired in P2-a).
 //! let _ = engine.estimate();
 //! # Ok(())
+//! # }
+//! #
+//! # /// Stands in for the caller's own offscreen render. Deliberately
+//! # /// textured: a flat placeholder would be refused at registration.
+//! # fn my_own_render() -> fidus::prelude::RgbaImage {
+//! #     let (w, h) = (64u32, 48u32);
+//! #     let mut data = Vec::with_capacity((w * h * 4) as usize);
+//! #     for y in 0..h {
+//! #         for x in 0..w {
+//! #             let v = ((x * 7) ^ (y * 13)) as u8;
+//! #             data.extend_from_slice(&[v, v.wrapping_mul(3), 255 - v, 255]);
+//! #         }
+//! #     }
+//! #     fidus::prelude::RgbaImage::from_raw(w, h, data)
 //! # }
 //! ```
 //!

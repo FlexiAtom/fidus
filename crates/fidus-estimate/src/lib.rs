@@ -30,7 +30,7 @@ pub mod motion_gate;
 pub mod screen_classifier;
 pub mod template;
 
-pub use fidus_core::target::{RgbaImage, TargetDescription};
+pub use fidus_core::target::{RgbaImage, TargetDescription, UntrackablePolicy};
 pub use fused::FusedEstimator;
 pub use kalman::VelocityTrack;
 pub use screen_classifier::{ScreenClassifier, WallpaperVerdict};
@@ -119,14 +119,62 @@ pub struct FingerprintEstimator {
     /// never presented as a fresh measurement.
     last_logical: Option<LogicalPoint>,
     lost_streak: u32,
+    /// Upper bound on reported confidence, set at registration from the
+    /// template's measured ambiguity. 1.0 for a distinctive render.
+    ///
+    /// Kept as state rather than recomputed per estimate because
+    /// `localizability` is an O(n) pass over the template and the value
+    /// cannot change until the target is re-registered.
+    confidence_ceiling: f32,
     /// Extra search margin around the predicted region, in capture pixels.
     pub search_margin_px: f64,
 }
 
+/// Confidence ceiling implied by a template's measured self-similarity.
+///
+/// Maps self-similarity `s` to `1 - s`, floored at [`MIN_CONFIDENCE_CEILING`]:
+/// a template that matches a shifted copy of itself at 0.9 can be
+/// mis-registered that easily, so a "0.95 confidence" match on it means
+/// something far weaker than the same number on a distinctive template.
+///
+/// This is continuous on purpose — a cliff at the accept/refuse boundary
+/// would make a template scoring just under the threshold indistinguishable
+/// from an excellent one, which is the same "plausible-looking value" trap
+/// the check exists to avoid (project convention 8).
+fn ambiguity_ceiling(self_similarity: f64) -> f32 {
+    let c = 1.0 - self_similarity.clamp(0.0, 1.0);
+    (c as f32).max(MIN_CONFIDENCE_CEILING)
+}
+
+/// Floor for the confidence ceiling.
+///
+/// Never 0: that would make the measurement indistinguishable from the
+/// "target lost, reporting prior" case (spec §4.5), which is a different
+/// statement — there fidus has *no* measurement, here it has a weak one.
+/// Small enough that the L7 fusion effectively defers to any other layer,
+/// and that a caller thresholding on confidence rejects it.
+const MIN_CONFIDENCE_CEILING: f32 = 0.05;
+
 impl FingerprintEstimator {
     /// An estimator with defaults (`search_margin_px = 48`).
     pub fn new() -> Self {
-        Self { target: None, last_logical: None, lost_streak: 0, search_margin_px: 48.0 }
+        Self {
+            target: None,
+            last_logical: None,
+            lost_streak: 0,
+            confidence_ceiling: 1.0,
+            search_margin_px: 48.0,
+        }
+    }
+
+    /// Upper bound currently applied to reported confidence, from the
+    /// registered template's measured ambiguity (1.0 when distinctive).
+    ///
+    /// Exposed so a caller that opted into
+    /// [`UntrackablePolicy::TrackWithReducedConfidence`] can see how much
+    /// credibility that cost.
+    pub fn confidence_ceiling(&self) -> f32 {
+        self.confidence_ceiling
     }
 
     /// The logical-space template resampled to capture-pixel scale.
@@ -166,19 +214,42 @@ impl Estimator for FingerprintEstimator {
         // already there — a gradient stays a gradient at any scale. Checking
         // here also means the caller finds out at registration, not on the
         // first estimate after calibration.
-        match template::localizability(&target.template_logical) {
-            Ok(_) => {}
-            Err(e) => {
-                return Err(EstimateError::UntrackableTarget {
-                    reason: match e {
-                        template::Unlocatable::TooSmall => "too small",
-                        template::Unlocatable::Featureless => "featureless",
-                        template::Unlocatable::SelfSimilar { .. } => "translation-ambiguous",
-                    },
-                    detail: e.to_string(),
-                });
-            }
-        }
+        self.confidence_ceiling = match template::localizability(&target.template_logical) {
+            // Trackable. A template that is *somewhat* self-similar is still
+            // discounted, continuously: there is no cliff at the accept/
+            // refuse boundary, so a marginal render does not get to look as
+            // trustworthy as a distinctive one.
+            Ok(self_similarity) => ambiguity_ceiling(self_similarity),
+            Err(e) => match target.untrackable_policy {
+                UntrackablePolicy::Refuse => {
+                    return Err(EstimateError::UntrackableTarget {
+                        reason: match e {
+                            template::Unlocatable::TooSmall => "too small",
+                            template::Unlocatable::Featureless => "featureless",
+                            template::Unlocatable::SelfSimilar { .. } => "translation-ambiguous",
+                        },
+                        detail: e.to_string(),
+                    });
+                }
+                // The caller explicitly asked for a best-effort track. Honour
+                // it, but never let such a measurement claim to be as good as
+                // one from a distinctive template: the position really is
+                // unreliable, and spec §6.1 is kept by *labelling* that, not
+                // by suppressing it.
+                UntrackablePolicy::TrackWithReducedConfidence => match e {
+                    // Ambiguity was measured: discount by how bad it is, so a
+                    // borderline template is not flattened to the same value
+                    // as a hopeless one.
+                    template::Unlocatable::SelfSimilar { worst } => ambiguity_ceiling(worst),
+                    // No usable measurement of ambiguity exists (flat, or too
+                    // small to probe). Nothing distinguishes one position
+                    // from another, so the ceiling is the floor.
+                    template::Unlocatable::Featureless | template::Unlocatable::TooSmall => {
+                        MIN_CONFIDENCE_CEILING
+                    }
+                },
+            },
+        };
         self.target = Some(target);
         // The last position hint is deliberately kept: re-registration
         // (e.g. an appearance refresh) usually happens while the target is
@@ -227,7 +298,11 @@ impl Estimator for FingerprintEstimator {
                 let position = m.position_logical;
                 self.last_logical = Some(position);
                 self.lost_streak = 0;
-                let confidence = m.confidence;
+                // Cap by the template's measured ambiguity. A high NCC score
+                // on a self-similar template says "this looks like the
+                // target", not "the target is here" — the ceiling is what
+                // keeps the second claim from riding on the first.
+                let confidence = m.confidence.min(self.confidence_ceiling);
                 Ok(ProbabilisticPosition {
                     position,
                     confidence,
@@ -336,11 +411,9 @@ mod tests {
     }
 
     fn register(est: &mut FingerprintEstimator, initial: Option<LogicalPoint>) {
-        est.register_target(TargetDescription {
-            template_logical: test_template(),
-            initial_center: initial,
-        })
-        .expect("valid target");
+        let mut t = TargetDescription::new(test_template());
+        t.initial_center = initial;
+        est.register_target(t).expect("valid target");
     }
 
     #[test]
@@ -421,10 +494,124 @@ mod tests {
     #[test]
     fn null_estimator_refuses_registration() {
         let mut e = NullEstimator;
-        let r = e.register_target(TargetDescription {
-            template_logical: test_template(),
-            initial_center: None,
-        });
+        let r = e.register_target(TargetDescription::new(test_template()));
         assert!(matches!(r, Err(EstimateError::NotImplementedYet { .. })));
+    }
+
+    /// A 60×40 horizontal gradient: unlocatable, but not for lack of
+    /// contrast (std. dev. ≈ 74, higher than the hash texture that tracks
+    /// perfectly). It correlates 1.000 with a shifted copy of itself.
+    fn gradient_template() -> RgbaImage {
+        let (w, h) = (60u32, 40u32);
+        let mut data = Vec::with_capacity((w * h * 4) as usize);
+        for _ in 0..h {
+            for x in 0..w {
+                let v = (x * 255 / w) as u8;
+                data.extend_from_slice(&[v, v, v, 255]);
+            }
+        }
+        RgbaImage::from_raw(w, h, data)
+    }
+
+    #[test]
+    fn ambiguous_appearance_is_refused_by_default() {
+        // The default policy must be refusal: a caller who never thought
+        // about localizability gets an error at registration, not a track
+        // that wanders for reasons nothing reports.
+        let mut est = FingerprintEstimator::new();
+        let r = est.register_target(TargetDescription::new(gradient_template()));
+        assert!(
+            matches!(r, Err(EstimateError::UntrackableTarget { .. })),
+            "gradient accepted by default: {r:?}"
+        );
+        // A refused registration must not become the active target.
+        assert!(est.target.is_none(), "refused target was stored anyway");
+    }
+
+    #[test]
+    fn opting_in_trades_credibility_for_a_track() {
+        // The escape hatch: explicitly requested, and it costs confidence
+        // rather than honesty. The measurement is still real — it is just
+        // labelled as weak, which is what spec §6.1 requires of an
+        // unreliable position.
+        let mut est = FingerprintEstimator::new();
+        est.register_target(
+            TargetDescription::new(gradient_template()).tracking_ambiguous_appearance(),
+        )
+        .expect("explicit opt-in must be honoured");
+
+        let ceiling = est.confidence_ceiling();
+        assert!(
+            (MIN_CONFIDENCE_CEILING..0.1).contains(&ceiling),
+            "a 1.000-self-similar template must be capped near the floor, got {ceiling}"
+        );
+    }
+
+    #[test]
+    fn opting_in_does_not_weaken_a_distinctive_template() {
+        // The policy is a fallback for ambiguous renders, not a global
+        // discount: a caller that sets it defensively while supplying a good
+        // template must not be penalised for it.
+        let mut est = FingerprintEstimator::new();
+        est.register_target(
+            TargetDescription::new(test_template()).tracking_ambiguous_appearance(),
+        )
+        .expect("distinctive template is trackable regardless of policy");
+        assert!(
+            est.confidence_ceiling() > 0.5,
+            "distinctive template capped at {}",
+            est.confidence_ceiling()
+        );
+    }
+
+    #[test]
+    fn reduced_ceiling_actually_caps_reported_confidence() {
+        // The ceiling has to reach the output, or it is a decorative knob
+        // (project convention 7). This tracks a real match of the gradient
+        // and checks the reported confidence, not just the stored field.
+        let frame = test_frame();
+        let mut strict = FingerprintEstimator::new();
+        register(&mut strict, Some(LogicalPoint::new(100.0, 75.0)));
+        let mut io = FakeCapture { top_left: Some((200.0, 150.0)) };
+        let good = strict.estimate(&mut io, &frame).expect("distinctive target tracks");
+
+        let mut lax = FingerprintEstimator::new();
+        lax.register_target(
+            TargetDescription::new(gradient_template())
+                .tracking_ambiguous_appearance(),
+        )
+        .expect("opt-in accepted");
+        let capped = lax.confidence_ceiling();
+
+        assert!(
+            good.confidence > capped,
+            "a distinctive template ({}) must outrank the ambiguous ceiling ({capped})",
+            good.confidence
+        );
+        // And the cap is applied by `min`, so no match on the gradient can
+        // ever report more than the ceiling.
+        assert!(capped < 0.1, "ambiguous ceiling too generous: {capped}");
+    }
+
+    #[test]
+    fn ambiguity_ceiling_is_monotonic_and_bounded() {
+        // Continuous discount, no cliff at the accept/refuse boundary: a
+        // marginal template must not be able to look as good as an excellent
+        // one (project convention 8).
+        let mut prev = f32::INFINITY;
+        for i in 0..=100 {
+            let s = i as f64 / 100.0;
+            let c = ambiguity_ceiling(s);
+            assert!(c <= prev + 1e-6, "ceiling rose at self-similarity {s}: {c} > {prev}");
+            assert!(
+                (MIN_CONFIDENCE_CEILING..=1.0).contains(&c),
+                "ceiling {c} out of range at {s}"
+            );
+            prev = c;
+        }
+        // Never zero: "weak measurement" and "no measurement" (spec §4.5)
+        // are different statements and must stay distinguishable.
+        assert!(ambiguity_ceiling(1.0) > 0.0);
+        assert!((ambiguity_ceiling(0.0) - 1.0).abs() < 1e-6);
     }
 }

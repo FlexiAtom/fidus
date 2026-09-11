@@ -126,10 +126,10 @@ impl Clock {
 fn estimator(clock: &Clock) -> FusedEstimator {
     let shared = clock.t;
     let mut e = FusedEstimator::with_clock(Box::new(move || shared));
-    e.register_target(TargetDescription {
-        template_logical: template(0),
-        initial_center: Some(LogicalPoint::new(200.0, 150.0)),
-    })
+    e.register_target(
+        TargetDescription::new(template(0))
+            .with_initial_center(LogicalPoint::new(200.0, 150.0)),
+    )
     .expect("valid target");
     e
 }

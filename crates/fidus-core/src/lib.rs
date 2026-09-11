@@ -69,5 +69,5 @@ pub mod prelude {
         CalibrationIo, CaptureError, CaptureIo, Frame, IoFactory, MarkerError, MarkerShape, MarkerStyle,
         PixelFormat,
     };
-    pub use crate::target::{RgbaImage, TargetDescription};
+    pub use crate::target::{RgbaImage, TargetDescription, UntrackablePolicy};
 }
