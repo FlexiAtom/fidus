@@ -155,6 +155,30 @@ impl Estimator for FingerprintEstimator {
         if target.template_logical.width == 0 || target.template_logical.height == 0 {
             return Err(EstimateError::NoTarget);
         }
+        // Refuse appearances that template matching cannot localize, rather
+        // than accepting them and emitting confident measurements at
+        // arbitrary positions for the rest of the session. See
+        // `template::localizability` for why variance is not the test, and
+        // `EstimateError::UntrackableTarget` for why this is an error.
+        //
+        // Checked on the *logical* render: the physical template is a
+        // resample of it, and resampling cannot create structure that is not
+        // already there — a gradient stays a gradient at any scale. Checking
+        // here also means the caller finds out at registration, not on the
+        // first estimate after calibration.
+        match template::localizability(&target.template_logical) {
+            Ok(_) => {}
+            Err(e) => {
+                return Err(EstimateError::UntrackableTarget {
+                    reason: match e {
+                        template::Unlocatable::TooSmall => "too small",
+                        template::Unlocatable::Featureless => "featureless",
+                        template::Unlocatable::SelfSimilar { .. } => "translation-ambiguous",
+                    },
+                    detail: e.to_string(),
+                });
+            }
+        }
         self.target = Some(target);
         // The last position hint is deliberately kept: re-registration
         // (e.g. an appearance refresh) usually happens while the target is

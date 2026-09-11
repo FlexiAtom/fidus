@@ -45,6 +45,52 @@ const MIN_VARIANCE_PER_SAMPLE: f64 = 0.25;
 /// Downsampling factor of the coarse pyramid level.
 const COARSE_STEP: u32 = 3;
 
+/// Shift radii (capture pixels) at which template self-similarity is probed
+/// by [`localizability`].
+///
+/// The smallest radius must exceed the subpixel refinement range (±1 px)
+/// so that "the peak is one pixel wide" is not mistaken for ambiguity; the
+/// largest is the scale over which a tracking loop must stay locked between
+/// frames.
+const SELF_SIMILARITY_RADII: [i64; 4] = [2, 4, 8, 16];
+
+/// Self-similarity above which a template is refused outright: at this level
+/// the NCC surface has no distinguishable peak, so the reported position is
+/// arbitrary within the ambiguous region.
+///
+/// 0.98 is deliberately just below the pathological cases (a linear gradient
+/// scores exactly 1.000 at *every* radius — it is translation-invariant along
+/// its axis) and comfortably above the worst legitimate template measured
+/// (a solid block with a thin border: 0.822 at r=2, decaying to 0.648).
+const MAX_SELF_SIMILARITY: f64 = 0.98;
+
+/// Minimum decay of self-similarity from the smallest probe radius to the
+/// largest before a template counts as genuinely localizable.
+///
+/// # Why decay, not an absolute level (measured, not guessed)
+///
+/// Variance is *not* a proxy for localizability, which is the trap this
+/// check exists to avoid. Measured on 60×40 templates, luma std. dev. versus
+/// max NCC at a ≥2 px shift:
+///
+/// | template | std | r=2 | r=16 | verdict |
+/// |---|---|---|---|---|
+/// | linear gradient | **73.6** | 1.000 | 1.000 | unlocatable — high variance, zero information |
+/// | grating (fx=1, fy=2) | 60.1 | 0.980 | 0.194 | periodic but decays → usable |
+/// | solid block + thin border | 97.5 | 0.822 | 0.648 | weak texture, still locatable |
+/// | hash texture | 57.2 | 0.170 | 0.204 | excellent |
+///
+/// A high-variance gradient is the *worst* case while a lower-variance hash
+/// pattern is the best, so any variance threshold is either useless or
+/// actively wrong. What separates them is whether self-similarity **falls
+/// off** with distance: a locatable template looks progressively less like
+/// itself as it slides, a pathological one does not.
+///
+/// A flat 0.65 plateau (the block case) passes because its *absolute* level
+/// is far from 1.0 — decay is only required of templates that start out
+/// highly self-similar.
+const MIN_SELF_SIMILARITY_DECAY: f64 = 0.1;
+
 /// Coarse candidates carried into the full-resolution refinement.
 ///
 /// More than one because the blurred landscape's summit can sit a step away
@@ -128,6 +174,155 @@ fn block_mean_template(t: &RgbaImage, x0: u32, y0: u32, step: u32) -> f32 {
         }
     }
     if n == 0.0 { 0.0 } else { sum / n }
+}
+
+/// Why a template cannot be tracked, as reported by [`localizability`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Unlocatable {
+    /// Smaller than the smallest probe shift, so self-similarity cannot even
+    /// be measured — and a template this small carries too little structure
+    /// to survive a busy background regardless.
+    TooSmall,
+    /// Flat: no matchable structure at all (a solid color, or noise below
+    /// the quantization floor). See [`MIN_VARIANCE_PER_SAMPLE`].
+    Featureless,
+    /// The template looks like itself under translation, so the NCC peak is
+    /// not a peak: the match position is arbitrary within the ambiguous
+    /// region. Linear gradients are the canonical case.
+    SelfSimilar {
+        /// Highest NCC against a shifted copy of itself.
+        worst: f64,
+    },
+}
+
+impl core::fmt::Display for Unlocatable {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Unlocatable::TooSmall => write!(f, "template is smaller than the probe radius"),
+            Unlocatable::Featureless => write!(f, "template is flat: no matchable structure"),
+            Unlocatable::SelfSimilar { worst } => write!(
+                f,
+                "template is translation-ambiguous (self-similarity {worst:.3}); \
+                 a gradient or a repeating pattern cannot be localized"
+            ),
+        }
+    }
+}
+
+/// Whether `template` can be located at all, and how distinctly.
+///
+/// Returns the **worst** (highest) self-similarity across
+/// [`SELF_SIMILARITY_RADII`] on success: 0 means every shifted copy is
+/// uncorrelated (ideal), values approaching 1 mean the match position is
+/// increasingly arbitrary.
+///
+/// # Why this is checked at registration and not only at match time
+///
+/// `match_template` already refuses a *flat* template, but flatness is the
+/// easy case. A linear gradient is not flat — it has a luma std. dev. of ~74
+/// — yet it correlates 1.000 with itself at every shift, so NCC returns a
+/// confident-looking score at an essentially random position. Downstream that
+/// is indistinguishable from a real measurement: it enters the fusion with
+/// full confidence and drags the Kalman track to a fictitious place. Refusing
+/// at registration turns a silent, permanent tracking error into an immediate
+/// error return the caller can act on (project convention 4: degenerate input
+/// is refused, not smoothed over).
+///
+/// # Failure mode of this check
+///
+/// It samples a fixed set of radii, so a pattern that repeats with a period
+/// landing exactly between them (e.g. self-similar at 6 px but not at 4 or 8)
+/// can slip through. That is contained rather than fatal: such a template
+/// still produces a *correct* peak at its true position — the ambiguity is
+/// between equally-good candidates at a fixed offset, and the L7 fusion's
+/// motion model rejects the resulting jumps as inconsistent with the track.
+/// The cases this must catch — gradients and near-uniform fills, which are
+/// ambiguous at *every* radius — cannot slip through any radius choice.
+pub fn localizability(template: &RgbaImage) -> Result<f64, Unlocatable> {
+    let (w, h) = (template.width as i64, template.height as i64);
+    let min_radius = SELF_SIMILARITY_RADII[0];
+    // Need real overlap left after the largest shift, not merely a nonzero
+    // one: a sliver of a few pixels produces noisy, meaningless correlations.
+    if w <= min_radius * 2 || h <= min_radius * 2 {
+        return Err(Unlocatable::TooSmall);
+    }
+    if !SampledTemplate::build(template, 1).is_matchable() {
+        return Err(Unlocatable::Featureless);
+    }
+
+    let mut by_radius = Vec::with_capacity(SELF_SIMILARITY_RADII.len());
+    for r in SELF_SIMILARITY_RADII {
+        // Shifts along both axes and both diagonals: a pattern can be
+        // ambiguous along one direction only (a vertical gradient is
+        // perfectly distinct horizontally), and one such direction is enough
+        // to make the position arbitrary.
+        let mut worst = f64::NEG_INFINITY;
+        for (dx, dy) in [(r, 0), (0, r), (r, r), (r, -r)] {
+            if let Some(s) = self_ncc(template, dx, dy) {
+                worst = worst.max(s);
+            }
+        }
+        if worst.is_finite() {
+            by_radius.push(worst);
+        }
+    }
+    if by_radius.is_empty() {
+        return Err(Unlocatable::TooSmall);
+    }
+
+    let worst = by_radius.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    if worst >= MAX_SELF_SIMILARITY {
+        return Err(Unlocatable::SelfSimilar { worst });
+    }
+    // Highly self-similar templates must at least *decay*: a periodic
+    // pattern that decorrelates over distance is trackable, a
+    // translation-invariant one is not. Templates whose similarity is
+    // already low everywhere skip this (see MIN_SELF_SIMILARITY_DECAY).
+    let near = by_radius[0];
+    let far = *by_radius.last().expect("non-empty");
+    if near > 0.9 && near - far < MIN_SELF_SIMILARITY_DECAY {
+        return Err(Unlocatable::SelfSimilar { worst: near });
+    }
+    Ok(worst.clamp(0.0, 1.0))
+}
+
+/// NCC between `template` and a copy of itself shifted by `(dx, dy)`, over
+/// their overlap. `None` when the overlap is too small or either side is
+/// flat there.
+fn self_ncc(template: &RgbaImage, dx: i64, dy: i64) -> Option<f64> {
+    let (w, h) = (template.width as i64, template.height as i64);
+    let (x0, x1) = ((-dx).max(0), w.min(w - dx));
+    let (y0, y1) = ((-dy).max(0), h.min(h - dy));
+    if x1 - x0 < 4 || y1 - y0 < 4 {
+        return None;
+    }
+
+    let n = ((x1 - x0) * (y1 - y0)) as f64;
+    let (mut sa, mut sb) = (0.0f64, 0.0f64);
+    for y in y0..y1 {
+        for x in x0..x1 {
+            sa += template.luma_at(x as u32, y as u32) as f64;
+            sb += template.luma_at((x + dx) as u32, (y + dy) as u32) as f64;
+        }
+    }
+    let (ma, mb) = (sa / n, sb / n);
+
+    let (mut num, mut da, mut db) = (0.0f64, 0.0f64, 0.0f64);
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let a = template.luma_at(x as u32, y as u32) as f64 - ma;
+            let b = template.luma_at((x + dx) as u32, (y + dy) as u32) as f64 - mb;
+            num += a * b;
+            da += a * a;
+            db += b * b;
+        }
+    }
+    // Same rule as `ncc`: refuse degenerate denominators rather than divide
+    // by an epsilon and manufacture a score (project convention 4).
+    if da < MIN_VARIANCE_PER_SAMPLE * n || db < MIN_VARIANCE_PER_SAMPLE * n {
+        return None;
+    }
+    Some(num / (da.sqrt() * db.sqrt()))
 }
 
 /// Box-downsamples a luma plane by `step`, the frame-side counterpart of
@@ -444,5 +639,128 @@ mod tests {
         // Near-degenerate denominators used to produce |offset| >> 0.5.
         let d = parabola_offset(0.5 - 1e-12, 0.5, 0.5 - 2e-12);
         assert!(d.abs() <= 0.5, "d = {d}");
+    }
+
+    /// Builds a 60×40 RGBA template from a luma function.
+    fn tpl_from(f: impl Fn(u32, u32) -> u8) -> RgbaImage {
+        let (w, h) = (60u32, 40u32);
+        let mut data = Vec::with_capacity((w * h * 4) as usize);
+        for y in 0..h {
+            for x in 0..w {
+                let v = f(x, y);
+                data.extend_from_slice(&[v, v, v, 255]);
+            }
+        }
+        RgbaImage::from_raw(w, h, data)
+    }
+
+    #[test]
+    fn gradients_are_refused_despite_high_variance() {
+        // The whole reason this check is not a variance threshold: a linear
+        // gradient has a luma std. dev. of ~74 — higher than the hash texture
+        // that tracks perfectly — yet it correlates 1.000 with itself at
+        // every shift, so NCC reports a confident score at an arbitrary
+        // position. Variance says "plenty of signal"; localizability says
+        // "no information about *where*".
+        let horizontal = tpl_from(|x, _| (x * 255 / 60) as u8);
+        assert!(
+            matches!(localizability(&horizontal), Err(Unlocatable::SelfSimilar { .. })),
+            "horizontal gradient accepted: {:?}",
+            localizability(&horizontal)
+        );
+
+        // Ambiguity along a single axis is enough: this one is perfectly
+        // distinct horizontally, and useless vertically.
+        let vertical = tpl_from(|_, y| (y * 255 / 40) as u8);
+        assert!(
+            matches!(localizability(&vertical), Err(Unlocatable::SelfSimilar { .. })),
+            "vertical gradient accepted: {:?}",
+            localizability(&vertical)
+        );
+
+        // Adding ±1 LSB of noise to a gradient raises the variance but not
+        // the information: it must still be refused.
+        let noisy = tpl_from(|x, y| {
+            let base = (x * 255 / 60) as i32 + (((x * 3) ^ (y * 5)) % 3) as i32 - 1;
+            base.clamp(0, 255) as u8
+        });
+        assert!(
+            localizability(&noisy).is_err(),
+            "noise-dithered gradient accepted: {:?}",
+            localizability(&noisy)
+        );
+    }
+
+    #[test]
+    fn flat_and_tiny_templates_are_refused() {
+        assert_eq!(localizability(&tpl_from(|_, _| 128)), Err(Unlocatable::Featureless));
+
+        // Quantization-level noise is not structure. Note the assertion is
+        // on *refusal*, not on which variant: a ±1 LSB dither sits exactly on
+        // the MIN_VARIANCE_PER_SAMPLE boundary, so whether it is caught as
+        // `Featureless` or as `SelfSimilar` depends on rounding, not on
+        // specification. Pinning the variant here would fossilize an
+        // accident of the current implementation (project convention 5) —
+        // what the spec requires is only that it never be tracked.
+        let near_flat = tpl_from(|x, y| (128 + (((x * 7) ^ (y * 13)) % 2)) as u8);
+        assert!(
+            localizability(&near_flat).is_err(),
+            "±1 LSB dither accepted: {:?}",
+            localizability(&near_flat)
+        );
+
+        let tiny = RgbaImage::from_raw(3, 3, vec![200; 3 * 3 * 4]);
+        assert_eq!(localizability(&tiny), Err(Unlocatable::TooSmall));
+    }
+
+    #[test]
+    fn genuinely_locatable_templates_are_accepted() {
+        // Hash texture: the best case, self-similarity near zero.
+        let hash = tpl_from(hash_luma);
+        let s = localizability(&hash).expect("hash texture must be trackable");
+        assert!(s < 0.5, "hash texture self-similarity {s}");
+
+        // A grating is *periodic* — highly self-similar at 2 px (~0.98) —
+        // but it decorrelates with distance (~0.19 at 16 px), so its peak is
+        // real and it must NOT be refused. This is the case a naive
+        // "self-similarity > threshold" test would wrongly kill; it is also
+        // the pattern `fused_sim` tracks end-to-end.
+        let grating = tpl_from(|x, y| {
+            let v = 127.0
+                + 120.0
+                    * (2.0 * std::f64::consts::PI * x as f64 / 60.0).sin()
+                    * (2.0 * 2.0 * std::f64::consts::PI * y as f64 / 40.0).sin();
+            v.clamp(0.0, 255.0) as u8
+        });
+        assert!(localizability(&grating).is_ok(), "grating refused: {:?}", localizability(&grating));
+
+        // Weak texture, but locatable: a solid fill with a thin border. Its
+        // self-similarity plateaus around 0.65 — high, yet far enough from
+        // 1.0 that the peak is unambiguous. Refusing this would reject a
+        // perfectly ordinary UI element (a plain window with a frame).
+        let bordered =
+            tpl_from(|x, y| if (2..57).contains(&x) && (2..37).contains(&y) { 250 } else { 20 });
+        assert!(
+            localizability(&bordered).is_ok(),
+            "bordered block refused: {:?}",
+            localizability(&bordered)
+        );
+    }
+
+    #[test]
+    fn localizability_never_panics_on_degenerate_shapes() {
+        // Registration takes whatever the caller renders, so every shape has
+        // to produce a verdict rather than an index panic: 1-pixel strips,
+        // exactly-at-the-radius sizes, and extreme aspect ratios.
+        for (w, h) in [(1, 1), (1, 40), (60, 1), (4, 4), (5, 5), (4, 100), (100, 4)] {
+            let data: Vec<u8> = (0..(w * h))
+                .flat_map(|i| {
+                    let v = hash_luma(i % w, i / w);
+                    [v, v, v, 255]
+                })
+                .collect();
+            let img = RgbaImage::from_raw(w, h, data);
+            let _ = localizability(&img); // must not panic
+        }
     }
 }

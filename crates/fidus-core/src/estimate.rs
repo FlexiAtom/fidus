@@ -65,5 +65,30 @@ pub enum EstimateError {
     /// fabricated position (spec §4.5).
     #[error("tracking target not found in capture")]
     TargetLost,
+    /// The registered appearance cannot be located by template matching, so
+    /// tracking it would produce confident-looking measurements at arbitrary
+    /// positions.
+    ///
+    /// # Why this is an error and not a warning (spec §6.1, principle 4)
+    ///
+    /// A template that correlates with itself under translation — a linear
+    /// gradient, a large flat fill, a repeating pattern — still yields a high
+    /// NCC score, just at a meaningless position. Downstream that is
+    /// indistinguishable from a real measurement: it enters the fusion at
+    /// full confidence and drags the track somewhere fictitious. The pool
+    /// only accepts *real* measurements, so the honest move is to refuse the
+    /// target at registration rather than to emit plausible nonsense for the
+    /// rest of the session.
+    ///
+    /// Callers hitting this should give fidus a more distinctive render:
+    /// including a textured border or the target's detailed interior is
+    /// usually enough.
+    #[error("target appearance cannot be tracked: {reason}")]
+    UntrackableTarget {
+        /// Which degeneracy was detected.
+        reason: &'static str,
+        /// Human-readable detail, including the measured figure.
+        detail: String,
+    },
 }
 

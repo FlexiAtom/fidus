@@ -247,6 +247,7 @@ let _ = engine.estimate();
 
 ## C 层估计管线（P2）
 
+0. **注册即体检**：`register_target` 先跑 `localizability()`——拒绝**无法定位**的外观，而不是接受后长期产出似是而非的位置。判据是**自相关随平移距离的衰减**，不是方差：实测线性渐变标准差 73.6（很高）却在任意平移下自相关 1.000，NCC 会给出满分却**位置任意**；哈希纹理标准差 57.2 反而最佳。详见规格 §11.1。周期性光栅（0.98→0.19）和纯色块+细边框（平台 0.65）都放行——它们的峰是真的。
 1. **L1 Fingerprint**：调用方模板（逻辑像素渲染）按校准 scale 重采样 → NCC 粗到细扫描（预测位置播种）+ 亚像素峰拟合。
 2. **L8 EdgeSync + MotionGate**：500ms 窗口帧差分；目标区域变化率 R > max(baseline×3, 15%) 即 DYNAMIC 丢弃、连续 2 帧通过才恢复（§6.1）。基线非对称学习（慢升快降）避免稳态噪声卡死门限。有据细化：**已模板验证的位移 blob 即使 R 尖峰也放行**（尖峰由离场解释，到达内容经模板验证——比统计门更强的检查）。
 3. **L7 融合**：L1+L8 测量按置信度融合（互相印证加成）→ 常速度 Kalman（L4 运动模型）。首修/重捕获时**硬重置**（陈旧速度不得抹开跳变）；双盲帧**滑行**——按速度外推、置信度 0，明确标注是信念而非测量（§4.5 池内不进伪造值）。
@@ -254,7 +255,7 @@ let _ = engine.estimate();
 ## 测试
 
 ```bash
-cargo test     # 88 个测试：数学、Gate、检测器、L9/L0 端到端仿真、L1/L8/L7 估计器
+cargo test     # 92 个测试：数学、Gate、检测器、L9/L0 端到端仿真、L1/L8/L7 估计器
                #   含 2 个 compile_fail doctest，确保坐标注入入口在类型层面不存在
 cargo clippy   # 零警告
 ```
@@ -268,6 +269,7 @@ cargo clippy   # 零警告
 - **L0 在 rootless XWayland 上不可用**（取证五：`GetImage(root)` → `BadMatch`，连接时即诚实拒绝）。
 - **Windows / macOS 后端未实现**：这是**缺 backend，不是缺设计**。L0 Anchor 校准器、Gate 的能力判定、整条 C 层估计管线都与平台无关，需要的只是各约 300 行的"投射 + 截屏"原语适配（Windows: 分层窗口 + BitBlt；macOS: `NSPanel` + `CGWindowListCreateImage`，另需屏幕录制权限状态机 —— `PermissionState` 已预留 `RequiresRestart`，因为 macOS 授权后进程必须重启）。
 - **L10 GradientField**：Gate 诚实返回 `FeatureDisabled`。
+- **可定位性检查是固定半径采样**（2/4/8/16px）：周期恰好落在采样半径之间的图案（如在 6px 自相似但 4px/8px 不）可能漏过。这被**容纳**而非致命——此类模板在真实位置仍有正确的峰，歧义只存在于固定偏移的等优候选之间，L7 的运动模型会把由此产生的跳变判为与轨迹不符。必须拦的渐变与近匀色**在所有半径上都歧义**，不可能漏过。
 - **GNOME（无 layer-shell）**：需要 `fidus-backend-wayland-portal`，未实现。
 - **Y_INVERT**：screencopy 的 Y 反转已处理并有单测，但仅在实机（Niri 不置位该标志）验证过非反转路径。
 
