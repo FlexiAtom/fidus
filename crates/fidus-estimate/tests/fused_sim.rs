@@ -4,7 +4,7 @@
 use std::time::{Duration, Instant, SystemTime};
 
 use fidus_core::calibration::CalibrationMethod;
-use fidus_core::coord::{AffineTransform, LogicalPoint};
+use fidus_core::coord::{AffineTransform, LogicalPoint, PhysicalPoint, SolvedMap};
 use fidus_core::engine::Estimator;
 use fidus_core::estimate::EstimateError;
 use fidus_core::frame::{CalibrationQuality, CoordinateFrame};
@@ -18,8 +18,14 @@ const TW: u32 = 60; // logical template size; physical is 2× (120×80)
 const TH: u32 = 40;
 
 /// 500×375 logical output captured at 2×.
+///
+/// The map is *solved* from synthetic correspondences rather than written
+/// down: `CoordinateFrame` only accepts a `SolvedMap`, which is how principle
+/// 1 is enforced at the type level. Tests take the same road as production —
+/// the one thing a test must never do is get a privileged shortcut past the
+/// invariant it is supposed to be exercising.
 fn frame() -> CoordinateFrame {
-    let map = AffineTransform { a: 2.0, b: 0.0, c: 0.0, d: 0.0, e: 2.0, f: 0.0 };
+    let map = solved_2x();
     let quality = CalibrationQuality {
         rms_residual_px: 0.0,
         max_residual_px: 0.0,
@@ -30,6 +36,16 @@ fn frame() -> CoordinateFrame {
     };
     CoordinateFrame::new(map, (W, H), CalibrationMethod::Crosshair, quality, SystemTime::now())
         .expect("invertible")
+}
+
+/// Solves the exact `physical = 2 · logical` map from four corner
+/// correspondences, mimicking what a calibrator measures.
+fn solved_2x() -> SolvedMap {
+    let corr: Vec<_> = [(0.0, 0.0), (400.0, 0.0), (0.0, 300.0), (400.0, 300.0)]
+        .into_iter()
+        .map(|(x, y)| (LogicalPoint::new(x, y), PhysicalPoint::new(x * 2.0, y * 2.0)))
+        .collect();
+    AffineTransform::from_correspondences(&corr).expect("well-conditioned")
 }
 
 /// Integer-frequency product gratings. Distinct salts are **exactly

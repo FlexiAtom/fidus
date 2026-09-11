@@ -148,11 +148,11 @@ fn config(seed: u64) -> AnchorConfig {
 fn recovers_identity_mapping() {
     let mut io = FakeRoot::new((1024, 768));
     let frame = AnchorCalibrator::new(config(7)).calibrate(&mut io).expect("calibrates");
-    let m = frame.map();
-    assert!((m.a - 1.0).abs() < 0.01, "a = {}", m.a);
-    assert!(m.c.abs() < 0.5, "c = {}", m.c);
-    assert!((m.e - 1.0).abs() < 0.01, "e = {}", m.e);
-    assert!(m.f.abs() < 0.5, "f = {}", m.f);
+    let [a, _b, c, _d, e, f] = frame.map().coefficients();
+    assert!((a - 1.0).abs() < 0.01, "a = {a}");
+    assert!(c.abs() < 0.5, "c = {c}");
+    assert!((e - 1.0).abs() < 0.01, "e = {e}");
+    assert!(f.abs() < 0.5, "f = {f}");
     let q = frame.quality();
     assert_eq!(q.independent_passes, 2);
     assert_eq!(q.sample_count, 4);
@@ -171,11 +171,11 @@ fn recovers_scale_and_offset() {
     io.scale = 1.5;
     io.offset = (32.0, 16.0);
     let frame = AnchorCalibrator::new(config(11)).calibrate(&mut io).expect("calibrates");
-    let m = frame.map();
-    assert!((m.a - 1.5).abs() < 0.01, "a = {}", m.a);
-    assert!((m.e - 1.5).abs() < 0.01, "e = {}", m.e);
-    assert!((m.c - 32.0).abs() < 1.0, "c = {} (want 32)", m.c);
-    assert!((m.f - 16.0).abs() < 1.0, "f = {} (want 16)", m.f);
+    let [a, _b, c, _d, e, f] = frame.map().coefficients();
+    assert!((a - 1.5).abs() < 0.01, "a = {a}");
+    assert!((e - 1.5).abs() < 0.01, "e = {e}");
+    assert!((c - 32.0).abs() < 1.0, "c = {c} (want 32)");
+    assert!((f - 16.0).abs() < 1.0, "f = {f} (want 16)");
     assert!((frame.map().linear_scale() - 1.5).abs() < 0.01);
 }
 
@@ -192,8 +192,8 @@ fn static_sentinel_colored_wallpaper_is_harmless() {
         (LogicalPoint::new(500.0, 400.0), SENTINEL_COLORS[3]),
     ];
     let frame = AnchorCalibrator::new(config(5)).calibrate(&mut io).expect("static decoys cancel out");
-    let m = frame.map();
-    assert!((m.a - 1.0).abs() < 0.01 && m.c.abs() < 0.5 && m.f.abs() < 0.5, "{m:?}");
+    let [a, _b, c, _d, _e, f] = frame.map().coefficients();
+    assert!((a - 1.0).abs() < 0.01 && c.abs() < 0.5 && f.abs() < 0.5, "{:?}", frame.map());
     assert!(io.destroyed);
 }
 

@@ -242,8 +242,16 @@ mod tests {
     const H: u32 = 750;
 
     /// Frame for a 500×375 logical output captured at 2× (1000×750 px).
+    ///
+    /// Solved from synthetic correspondences, not declared: `CoordinateFrame`
+    /// only accepts a `SolvedMap` (principle 1 at the type level), and tests
+    /// must exercise the same path production does.
     fn test_frame() -> CoordinateFrame {
-        let map = AffineTransform { a: 2.0, b: 0.0, c: 0.0, d: 0.0, e: 2.0, f: 0.0 };
+        let corr: Vec<_> = [(0.0, 0.0), (400.0, 0.0), (0.0, 300.0), (400.0, 300.0)]
+            .into_iter()
+            .map(|(x, y)| (LogicalPoint::new(x, y), PhysicalPoint::new(x * 2.0, y * 2.0)))
+            .collect();
+        let map = AffineTransform::from_correspondences(&corr).expect("well-conditioned");
         let quality = CalibrationQuality {
             rms_residual_px: 0.0,
             max_residual_px: 0.0,

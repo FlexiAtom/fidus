@@ -43,6 +43,10 @@ use crate::{l1_match, FingerprintEstimator};
 const AGREE_PX: f64 = 8.0;
 /// Confidence bonus when both layers measured and agree.
 const CORROBORATION_BONUS: f32 = 0.15;
+/// Default measurement variance at confidence 1.0 (≈1 px std. dev.).
+const DEFAULT_R_MIN_PX2: f64 = 1.0;
+/// Default measurement variance at confidence 0.0 (≈20 px std. dev.).
+const DEFAULT_R_MAX_PX2: f64 = 400.0;
 
 /// The fused L7 estimator (P2-c).
 pub struct FusedEstimator {
@@ -63,9 +67,12 @@ pub struct FusedEstimator {
     /// White-acceleration process noise, px/s². Higher follows drags more
     /// aggressively at the cost of noisier coasting.
     pub process_noise: f64,
-    /// Measurement variance at confidence 1.0, px².
+    /// Measurement variance at confidence 1.0, px². Read by
+    /// [`Self::r_of`]; values that are not finite and non-negative fall back
+    /// to the default.
     pub r_min_px2: f64,
-    /// Measurement variance at confidence 0.0, px².
+    /// Measurement variance at confidence 0.0, px². Read by
+    /// [`Self::r_of`]; same validation as [`Self::r_min_px2`].
     pub r_max_px2: f64,
     /// Extra search margin around the predicted region, in capture pixels.
     pub search_margin_px: f64,
@@ -74,6 +81,15 @@ pub struct FusedEstimator {
 }
 
 impl FusedEstimator {
+    /// Smallest measurement variance the filter will ever accept, px².
+    ///
+    /// `r = 0` claims a noiseless measurement: the Kalman gain becomes 1, the
+    /// posterior variance collapses to 0, and from then on the filter ignores
+    /// every future measurement — an absorbing state (project convention 2).
+    /// 1e-6 px² is far below any real detector's precision while keeping the
+    /// gain finite.
+    pub const MIN_VARIANCE_PX2: f64 = 1e-6;
+
     /// A fused estimator with defaults and the wall clock.
     pub fn new() -> Self {
         Self::with_clock(Box::new(Instant::now))
@@ -91,8 +107,8 @@ impl FusedEstimator {
             lost_streak: 0,
             clock,
             process_noise: 2000.0,
-            r_min_px2: 1.0,
-            r_max_px2: 400.0,
+            r_min_px2: DEFAULT_R_MIN_PX2,
+            r_max_px2: DEFAULT_R_MAX_PX2,
             search_margin_px: 48.0,
             widen_per_miss_px: 64.0,
         }
@@ -104,10 +120,39 @@ impl FusedEstimator {
         self.clock = clock;
     }
 
-    /// Measurement variance derived from confidence.
-    fn r_of(confidence: f32) -> f64 {
-        let c = confidence.clamp(0.0, 1.0) as f64;
-        1.0 + (1.0 - c) * 399.0
+    /// Measurement variance derived from confidence, interpolating between
+    /// the configured [`r_min_px2`](Self::r_min_px2) (confidence 1) and
+    /// [`r_max_px2`](Self::r_max_px2) (confidence 0).
+    ///
+    /// # Why this reads the fields (project convention 7)
+    ///
+    /// It used to hard-code `1.0 + (1 - c) * 399.0`, i.e. the *default*
+    /// values of the two public fields, baked in. Both knobs were therefore
+    /// decorative: a caller tuning `r_max_px2` for a noisy display changed
+    /// nothing, and no error said so. A public field the implementation does
+    /// not read is a lie told by the API.
+    ///
+    /// # Failure mode and why it is contained
+    ///
+    /// The fields are `pub`, so a caller can set them to anything, including
+    /// `r_min > r_max` or negative values. Rather than trusting them:
+    ///
+    /// * non-finite or negative inputs fall back to the defaults — a variance
+    ///   must be a non-negative real or the Kalman gain is meaningless;
+    /// * the interval is ordered by `min`/`max`, so a swapped pair degrades
+    ///   into a valid (if inverted-intent) range instead of producing a
+    ///   negative width and a variance that *decreases* with uncertainty;
+    /// * the result is floored at [`MIN_VARIANCE_PX2`](Self::MIN_VARIANCE_PX2)
+    ///   because `r = 0` asserts a perfect measurement: the filter would
+    ///   discard its entire prior in one step, and any later disagreement
+    ///   would be impossible to reconcile.
+    fn r_of(&self, confidence: f32) -> f64 {
+        let sane = |v: f64, fallback: f64| if v.is_finite() && v >= 0.0 { v } else { fallback };
+        let lo = sane(self.r_min_px2, DEFAULT_R_MIN_PX2);
+        let hi = sane(self.r_max_px2, DEFAULT_R_MAX_PX2);
+        let (lo, hi) = (lo.min(hi), lo.max(hi));
+        let c = if confidence.is_finite() { confidence.clamp(0.0, 1.0) as f64 } else { 0.0 };
+        (hi + (lo - hi) * c).max(Self::MIN_VARIANCE_PX2)
     }
 
     /// Half-extent of the search window around a predicted center.
@@ -130,7 +175,8 @@ impl FusedEstimator {
             self.track.reset(position_logical);
             self.has_fix = true;
         } else {
-            self.track.update(position_logical, Self::r_of(confidence));
+            let r = self.r_of(confidence);
+            self.track.update(position_logical, r);
         }
         self.lost_streak = 0;
         self.last_bbox = Some(bbox_physical);
@@ -292,5 +338,66 @@ fn bbox_around(c: PhysicalPoint, w: f64, h: f64) -> BoundingBox {
         y0: (c.y - h / 2.0) as i64,
         x1: (c.x + w / 2.0) as i64,
         y1: (c.y + h / 2.0) as i64,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn r_of_spans_the_configured_interval() {
+        // Project convention 7: the public knobs must actually be read. The
+        // old `r_of` hard-coded `1.0 + (1-c)*399.0`, so these assertions all
+        // failed at the non-default settings below while the API kept
+        // advertising the fields.
+        let mut e = FusedEstimator::new();
+        assert!((e.r_of(1.0) - DEFAULT_R_MIN_PX2).abs() < 1e-9);
+        assert!((e.r_of(0.0) - DEFAULT_R_MAX_PX2).abs() < 1e-9);
+
+        e.r_min_px2 = 4.0;
+        e.r_max_px2 = 900.0;
+        assert!((e.r_of(1.0) - 4.0).abs() < 1e-9, "tuned r_min ignored");
+        assert!((e.r_of(0.0) - 900.0).abs() < 1e-9, "tuned r_max ignored");
+        assert!((e.r_of(0.5) - 452.0).abs() < 1e-9, "midpoint {}", e.r_of(0.5));
+    }
+
+    #[test]
+    fn r_of_is_monotonic_in_confidence() {
+        // Higher confidence must never mean *more* assumed noise, or the
+        // filter would weight its worst measurements most heavily.
+        let e = FusedEstimator::new();
+        let mut prev = f64::INFINITY;
+        for i in 0..=100 {
+            let r = e.r_of(i as f32 / 100.0);
+            assert!(r <= prev + 1e-12, "r rose at confidence {}: {r} > {prev}", i as f32 / 100.0);
+            prev = r;
+        }
+    }
+
+    #[test]
+    fn hostile_knob_settings_cannot_break_the_filter() {
+        // The fields are pub, so they are untrusted input. None of these may
+        // yield a negative, NaN, or zero variance.
+        let mut e = FusedEstimator::new();
+        for (lo, hi) in [
+            (f64::NAN, 100.0),
+            (-5.0, 100.0),
+            (900.0, 4.0),           // swapped
+            (0.0, 0.0),             // both zero: would give gain 1 forever
+            (f64::INFINITY, 1.0),
+            (1.0, f64::NEG_INFINITY),
+        ] {
+            e.r_min_px2 = lo;
+            e.r_max_px2 = hi;
+            for c in [0.0f32, 0.5, 1.0, f32::NAN] {
+                let r = e.r_of(c);
+                assert!(r.is_finite(), "r = {r} for ({lo}, {hi}) at confidence {c}");
+                assert!(
+                    r >= FusedEstimator::MIN_VARIANCE_PX2,
+                    "r = {r} below the floor for ({lo}, {hi}) at confidence {c}"
+                );
+            }
+        }
     }
 }

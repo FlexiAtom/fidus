@@ -20,7 +20,7 @@
 //!   the session).
 
 use fidus_core::calibration::{CalibrationError, CalibrationMethod};
-use fidus_core::coord::{AffineTransform, LogicalPoint, PhysicalPoint};
+use fidus_core::coord::{AffineTransform, LogicalPoint, PhysicalPoint, SolvedMap};
 use fidus_core::engine::Calibrator;
 use fidus_core::frame::{CalibrationQuality, CoordinateFrame};
 use fidus_core::io::{CalibrationIo, MarkerShape, MarkerStyle};
@@ -131,7 +131,7 @@ impl CrosshairCalibrator {
             None => Rng::seed_from_clock(0xB9_u64.rotate_left(32) ^ marker.to_bits()),
         };
 
-        let mut pass_maps: Vec<AffineTransform> = Vec::with_capacity(cfg.passes);
+        let mut pass_maps: Vec<SolvedMap> = Vec::with_capacity(cfg.passes);
         let mut last_quality: Option<(CalibrationQuality, (u32, u32))> = None;
 
         for _ in 0..cfg.passes {
@@ -149,7 +149,9 @@ impl CrosshairCalibrator {
 
         // Independent passes must agree across the whole usable area.
         let probes = corner_probes(uw, uh);
-        let consistency = pass_maps[0].max_difference(&pass_maps[cfg.passes - 1], &probes);
+        let consistency = pass_maps[0]
+            .map()
+            .max_difference(&pass_maps[cfg.passes - 1].map(), &probes);
         if consistency > cfg.consistency_tolerance_px {
             return Err(CalibrationError::Inconsistent {
                 detail: format!(
@@ -181,7 +183,7 @@ impl CrosshairCalibrator {
         rng: &mut Rng,
         uw: f64,
         uh: f64,
-    ) -> Result<(AffineTransform, CalibrationQuality, (u32, u32)), CalibrationError> {
+    ) -> Result<(SolvedMap, CalibrationQuality, (u32, u32)), CalibrationError> {
         let cfg = self.config.clone();
         let marker_half = cfg.style.size_logical / 2.0;
         // Margin quantization: layer-shell margins are integer logical
@@ -211,7 +213,8 @@ impl CrosshairCalibrator {
             correspondences.push((center, detection.center));
         }
 
-        let (map, residuals) = AffineTransform::from_correspondences(&correspondences)?;
+        let solved = AffineTransform::from_correspondences(&correspondences)?;
+        let (map, residuals) = (solved.map(), solved.residuals());
         if residuals.rms > cfg.residual_tolerance_px || residuals.max > cfg.residual_tolerance_px * 2.0 {
             return Err(CalibrationError::AccuracyBelowThreshold {
                 measured: residuals.rms,
@@ -246,7 +249,7 @@ impl CrosshairCalibrator {
         }
 
         Ok((
-            map,
+            solved,
             CalibrationQuality {
                 rms_residual_px: residuals.rms,
                 max_residual_px: residuals.max,

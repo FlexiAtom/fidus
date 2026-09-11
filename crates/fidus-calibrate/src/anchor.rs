@@ -36,7 +36,7 @@
 //! one-shot calibration overlay tolerates a slightly more visible marker).
 
 use fidus_core::calibration::{CalibrationError, CalibrationMethod};
-use fidus_core::coord::{AffineTransform, LogicalPoint, PhysicalPoint};
+use fidus_core::coord::{AffineTransform, LogicalPoint, PhysicalPoint, SolvedMap};
 use fidus_core::engine::Calibrator;
 use fidus_core::frame::{CalibrationQuality, CoordinateFrame};
 use fidus_core::io::{CalibrationIo, Frame, MarkerShape, MarkerStyle};
@@ -143,7 +143,7 @@ impl Calibrator for AnchorCalibrator {
 
 /// One solved pass.
 struct PassSolution {
-    map: AffineTransform,
+    map: SolvedMap,
     quality: CalibrationQuality,
     capture_size: (u32, u32),
 }
@@ -190,7 +190,7 @@ impl AnchorCalibrator {
         ];
         let first = &solutions[0];
         let last = &solutions[solutions.len() - 1];
-        let consistency = first.map.max_difference(&last.map, &probes);
+        let consistency = first.map.map().max_difference(&last.map.map(), &probes);
         if consistency > cfg.consistency_tolerance_px {
             return Err(CalibrationError::Inconsistent {
                 detail: format!(
@@ -242,7 +242,8 @@ impl AnchorCalibrator {
         // Rectangle constraint on the detections (order is [TL, TR, BL, BR]).
         check_rectangle(&measured.correspondences, cfg.rectangle_tolerance_px)?;
 
-        let (map, res) = AffineTransform::from_correspondences(&measured.correspondences)?;
+        let solved = AffineTransform::from_correspondences(&measured.correspondences)?;
+        let (map, res) = (solved.map(), solved.residuals());
         if res.rms > cfg.residual_tolerance_px || res.max > cfg.residual_tolerance_px * 2.0 {
             return Err(CalibrationError::AccuracyBelowThreshold {
                 measured: res.rms,
@@ -280,7 +281,7 @@ impl AnchorCalibrator {
         }
 
         Ok(PassSolution {
-            map,
+            map: solved,
             quality: CalibrationQuality {
                 rms_residual_px: res.rms,
                 max_residual_px: res.max,

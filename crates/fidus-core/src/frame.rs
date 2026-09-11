@@ -3,7 +3,7 @@
 use std::time::SystemTime;
 
 use crate::calibration::CalibrationMethod;
-use crate::coord::{AffineTransform, LogicalPoint, PhysicalPoint, SolveError};
+use crate::coord::{AffineTransform, LogicalPoint, PhysicalPoint, SolveError, SolvedMap};
 
 /// Quality metrics of a solved [`CoordinateFrame`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -41,16 +41,33 @@ pub struct CoordinateFrame {
 }
 
 impl CoordinateFrame {
-    /// Builds a frame from a logical→physical map.
+    /// Builds a frame from a map that was **solved from measurements**.
     ///
     /// Fails if the map is not invertible.
+    ///
+    /// # Why the parameter is [`SolvedMap`], not [`AffineTransform`]
+    ///
+    /// Principle 1 is enforced structurally rather than by review: the only
+    /// source of a `SolvedMap` is
+    /// [`AffineTransform::from_correspondences`], so every frame in existence
+    /// traces back to detected marker centroids in fidus' own captures. There
+    /// is no expressible way to declare a frame — not even the identity map,
+    /// which would silently claim "capture pixels are logical pixels" and go
+    /// unnoticed on any 1× single-output desktop.
+    ///
+    /// *Failure mode this closes*: the previous signature accepted any
+    /// `AffineTransform`, and with `pub` coefficients that meant a platform
+    /// rect could be spelled `AffineTransform { c: x, f: y, .. }` and handed
+    /// in as a calibration result — the exact pool contamination spec §6.2
+    /// says the compiler should prevent.
     pub fn new(
-        map: AffineTransform,
+        solved: SolvedMap,
         capture_size: (u32, u32),
         method: CalibrationMethod,
         quality: CalibrationQuality,
         calibrated_at: SystemTime,
     ) -> Result<Self, SolveError> {
+        let map = solved.map();
         let inverse = map.inverse()?;
         Ok(Self { map, inverse, capture_size, method, quality, calibrated_at })
     }

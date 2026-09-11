@@ -121,25 +121,62 @@ pub struct Residuals {
 ///
 /// The full affine form (not merely axis-aligned scale + translate) is used so
 /// that rotated outputs (panel transforms) are covered by the same model.
+///
+/// # Why the coefficients are private (principle 1, type-level)
+///
+/// The fields used to be `pub`, which meant *any* six numbers could be
+/// declared a coordinate map — including a translation lifted straight out of
+/// `GetWindowRect` / `frameGeometry()`. Principle 1 states that the public API
+/// contains no coordinate-input entry point; a `pub` coefficient **is** such
+/// an entry point, however well-commented. Project convention 0: what can be
+/// sealed by types must not be sealed by convention.
+///
+/// The only ways to obtain a non-identity transform are therefore
+/// [`AffineTransform::from_correspondences`] (solved from measured point
+/// pairs) and [`AffineTransform::inverse`] (derived from one that was).
+/// [`AffineTransform::IDENTITY`] is reachable but carries no translation and
+/// no scale, so it cannot smuggle a position in.
+///
+/// *What this does **not** protect against, stated honestly*: a caller that
+/// fabricates the `PhysicalPoint`s it feeds to `from_correspondences` gets a
+/// fabricated map. That hole cannot be closed by types — detectors must be
+/// able to construct measured points — so it is closed by construction
+/// instead: the only `PhysicalPoint`s inside fidus come from blob detection
+/// over fidus' own captures. The seal here removes the *casual* injection
+/// path (`AffineTransform { c: x, f: y, .. }`), which is the one that
+/// actually happened.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AffineTransform {
     /// x' coefficient of x.
-    pub a: f64,
+    a: f64,
     /// x' coefficient of y.
-    pub b: f64,
+    b: f64,
     /// x' offset.
-    pub c: f64,
+    c: f64,
     /// y' coefficient of x.
-    pub d: f64,
+    d: f64,
     /// y' coefficient of y.
-    pub e: f64,
+    e: f64,
     /// y' offset.
-    pub f: f64,
+    f: f64,
 }
 
 impl AffineTransform {
     /// The identity transform.
+    ///
+    /// Safe to expose: zero translation and unit scale, so it cannot carry a
+    /// platform-supplied position. It is a mathematical unit, not a frame —
+    /// and on its own it cannot build a [`crate::frame::CoordinateFrame`],
+    /// which requires a [`SolvedMap`].
     pub const IDENTITY: Self = Self { a: 1.0, b: 0.0, c: 0.0, d: 0.0, e: 1.0, f: 0.0 };
+
+    /// The six coefficients as `[a, b, c, d, e, f]`.
+    ///
+    /// Read-only on purpose: diagnostics and logging need to see the map,
+    /// nothing needs to write it.
+    pub fn coefficients(&self) -> [f64; 6] {
+        [self.a, self.b, self.c, self.d, self.e, self.f]
+    }
 
     /// Maps a logical point to physical space.
     pub fn apply(&self, p: LogicalPoint) -> PhysicalPoint {
@@ -193,9 +230,13 @@ impl AffineTransform {
 
     /// Fits the transform to `≥ 3` non-collinear correspondences by least
     /// squares and reports the residuals.
+    ///
+    /// The result is a [`SolvedMap`] — a witness that these coefficients came
+    /// out of measured point pairs. [`crate::frame::CoordinateFrame`] accepts
+    /// nothing else, so "calibrated frame" cannot be asserted, only earned.
     pub fn from_correspondences(
         corr: &[(LogicalPoint, PhysicalPoint)],
-    ) -> Result<(AffineTransform, Residuals), SolveError> {
+    ) -> Result<SolvedMap, SolveError> {
         if corr.len() < 3 {
             return Err(SolveError::Degenerate);
         }
@@ -227,7 +268,7 @@ impl AffineTransform {
             max = max.max(d);
         }
         let n = corr.len() as f64;
-        Ok((t, Residuals { rms: (sum_sq / n).sqrt(), max }))
+        Ok(SolvedMap { map: t, residuals: Residuals { rms: (sum_sq / n).sqrt(), max }, points: corr.len() })
     }
 
     /// Largest deviation from `other` over the given probe points, evaluated
@@ -237,6 +278,94 @@ impl AffineTransform {
             .iter()
             .map(|p| self.apply(*p).distance(other.apply(*p)))
             .fold(0.0f64, |acc, d| acc.max(d))
+    }
+}
+
+/// A transform that was **solved from measured correspondences**, carried
+/// together with the fit quality that proves it.
+///
+/// # Why this type exists (principle 1, type-level)
+///
+/// Sealing [`AffineTransform`]'s coefficients stops
+/// `AffineTransform { c: native_x, f: native_y, .. }`, but
+/// [`AffineTransform::IDENTITY`] remains constructible — and handing
+/// `IDENTITY` to a frame constructor asserts "logical space *is* capture
+/// space", i.e. a 1:1 uncalibrated map masquerading as a calibration result.
+/// On an unscaled single-output desktop that map is even nearly right, so the
+/// lie would pass every sanity check and only fail on HiDPI or with a panel.
+///
+/// `SolvedMap` is an unforgeable witness: it has no public constructor, and
+/// [`AffineTransform::from_correspondences`] is the only thing that produces
+/// one. [`crate::frame::CoordinateFrame::new`] takes a `SolvedMap`, so a
+/// coordinate frame can only ever be *earned* by measuring, never asserted.
+///
+/// *Failure mode if this were skipped*: a well-meaning refactor writes
+/// `CoordinateFrame::new(AffineTransform::IDENTITY, ...)` as a "default"
+/// frame, every test passes on the developer's 1× screen, and fidus silently
+/// reports capture pixels as logical coordinates on every scaled display.
+///
+/// # The seal, as an executable test
+///
+/// Writing a platform rectangle straight into a map does not compile:
+///
+/// ```compile_fail
+/// use fidus_core::coord::AffineTransform;
+/// // Pretend these came from GetWindowRect / frameGeometry().
+/// let (native_x, native_y) = (120.0, 64.0);
+/// let injected = AffineTransform { a: 1.0, b: 0.0, c: native_x,
+///                                  d: 0.0, e: 1.0, f: native_y };
+/// ```
+///
+/// Nor does declaring a coordinate frame from an unsolved transform:
+///
+/// ```compile_fail
+/// use fidus_core::calibration::CalibrationMethod;
+/// use fidus_core::coord::AffineTransform;
+/// use fidus_core::frame::{CalibrationQuality, CoordinateFrame};
+/// let quality = CalibrationQuality {
+///     rms_residual_px: 0.0, max_residual_px: 0.0,
+///     verification_max_err_px: 0.0, consistency_max_err_px: 0.0,
+///     sample_count: 4, independent_passes: 2,
+/// };
+/// // `new` takes a SolvedMap; the identity transform is not one.
+/// let frame = CoordinateFrame::new(
+///     AffineTransform::IDENTITY, (1920, 1080),
+///     CalibrationMethod::Crosshair, quality, std::time::SystemTime::now(),
+/// );
+/// ```
+///
+/// Solving from measured pairs is the one road that works:
+///
+/// ```
+/// use fidus_core::coord::{AffineTransform, LogicalPoint, PhysicalPoint};
+/// let corr: Vec<_> = [(0.0, 0.0), (100.0, 0.0), (0.0, 100.0), (100.0, 100.0)]
+///     .into_iter()
+///     .map(|(x, y)| (LogicalPoint::new(x, y), PhysicalPoint::new(x * 2.0, y * 2.0)))
+///     .collect();
+/// let solved = AffineTransform::from_correspondences(&corr).unwrap();
+/// assert!((solved.map().linear_scale() - 2.0).abs() < 1e-9);
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SolvedMap {
+    map: AffineTransform,
+    residuals: Residuals,
+    points: usize,
+}
+
+impl SolvedMap {
+    /// The fitted logical→physical transform.
+    pub fn map(&self) -> AffineTransform {
+        self.map
+    }
+
+    /// Least-squares residuals of the fit.
+    pub fn residuals(&self) -> Residuals {
+        self.residuals
+    }
+
+    /// Number of correspondences the fit consumed.
+    pub fn point_count(&self) -> usize {
+        self.points
     }
 }
 

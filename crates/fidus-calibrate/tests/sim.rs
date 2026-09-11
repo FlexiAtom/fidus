@@ -257,10 +257,11 @@ fn recovers_known_mapping_end_to_end() {
     let frame = calibrator(7).calibrate(&mut io).expect("calibration succeeds");
 
     let m = frame.map();
-    assert!((m.a - 1.25).abs() < 0.02, "a = {}", m.a);
-    assert!(m.c.abs() < 0.6, "c = {}", m.c);
-    assert!((m.e - 1.25).abs() < 0.02, "e = {}", m.e);
-    assert!((m.f - 40.0).abs() < 0.8, "f = {}", m.f);
+    let [a, _b, c, _d, e, f] = m.coefficients();
+    assert!((a - 1.25).abs() < 0.02, "a = {a}");
+    assert!(c.abs() < 0.6, "c = {c}");
+    assert!((e - 1.25).abs() < 0.02, "e = {e}");
+    assert!((f - 40.0).abs() < 0.8, "f = {f}");
     assert!((m.linear_scale() - 1.25).abs() < 0.02);
 
     // Frame roundtrip through the calibrated map, away from the sample area.
@@ -286,9 +287,9 @@ fn wallpaper_noise_still_converges() {
         Noise::Wallpaper { seed: 0x0BEA },
     );
     let frame = calibrator(11).calibrate(&mut io).expect("calibration survives wallpaper");
-    let m = frame.map();
-    assert!((m.a - 1.25).abs() < 0.03, "a = {}", m.a);
-    assert!((m.f - 40.0).abs() < 1.0, "f = {}", m.f);
+    let [a, _b, _c, _d, _e, f] = frame.map().coefficients();
+    assert!((a - 1.25).abs() < 0.03, "a = {a}");
+    assert!((f - 40.0).abs() < 1.0, "f = {f}");
     assert!(io.destroyed);
 }
 

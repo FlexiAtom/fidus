@@ -39,16 +39,93 @@ use crate::{FULL_SCORE, MIN_SCORE};
 /// Luma difference above which a pixel counts as "changed" (0–255 scale).
 const CHANGE_THRESHOLD: f32 = 10.0;
 /// A candidate blob's bbox area must lie within `[AREA_MIN_FACTOR,
-/// AREA_MAX_FACTOR] ×` the expected target area. The tight upper bound also
-/// rejects blobs where the departure and arrival regions merged into one.
+/// AREA_MAX_FACTOR] ×` the expected target area.
+///
+/// # What the upper bound does and does *not* do (corrected in P2-f)
+///
+/// It used to be 2.5 and was documented as "also rejects blobs where the
+/// departure and arrival regions merged into one". **That claim was false**,
+/// and measurably so: a target of `w × h` displaced by `(dx, dy)` merges into
+/// a single blob of `(w + dx) × (h + dy)`, so for a 60×40 target the merged
+/// area only exceeds `2.5 ×` once the displacement passes **29 px** — about
+/// half the target width. Every smaller displacement produced a merged blob
+/// that sailed through the filter, and small displacements are the common
+/// case in a tracking loop.
+///
+/// Worse, the bound was simultaneously too *tight*: displacements between
+/// ~29 px and the separation point (`dx ≥ w`, where the two regions stop
+/// touching) also merge, and those were silently discarded — so L8 went blind
+/// across the entire mid-range of motion it exists to measure.
+///
+/// Area cannot distinguish these cases in the first place: a merged blob from
+/// a 2 px displacement has essentially the *same* area as a stationary one.
+/// So the bound no longer pretends to. It is now sized to **admit** every
+/// merged blob — two template-sized regions that touch span at most
+/// `2w × 2h = 4 ×` the expected area — and the merged/displaced ambiguity is
+/// resolved where it can actually be resolved: by template verification over
+/// a window wide enough to contain the arrival footprint (see the
+/// verification ROI in [`EdgeSync::observe`]).
+///
+/// *Failure mode of the new bound*: it admits more noise blobs than 2.5 did.
+/// That is contained because every candidate must still template-verify above
+/// `MIN_SCORE` before it becomes a measurement — an unrelated blob of roughly
+/// the right size does not correlate with the caller's own render.
 const AREA_MIN_FACTOR: f64 = 0.25;
-const AREA_MAX_FACTOR: f64 = 2.5;
+const AREA_MAX_FACTOR: f64 = 4.2;
 /// Minimum solidity (pixels / bbox area) for a blob to count as content
 /// instead of scattered noise.
 const MIN_FILL: f64 = 0.12;
 /// Blob centers within this distance of the prediction count as "in place"
 /// rather than displaced.
+///
+/// The distinction matters only for *how the gate verdict is applied*: an
+/// in-place re-confirmation carries no displacement information, so it obeys
+/// the gate literally, while a displaced blob explains its own `R` spike (see
+/// the module docs).
 const IN_PLACE_TOLERANCE_PX: f64 = 4.0;
+
+/// Pixels by which a blob must exceed the template's extent before an
+/// *in-place* but template-verified blob counts as a small departure rather
+/// than as content animating where it stands.
+///
+/// # Why a geometric test, and why it was needed (P2-f)
+///
+/// The displaced/in-place split above was used as a proxy for "is the `R`
+/// spike explained?", and the proxy fails for slow motion. A target drifting
+/// 2 px per window — an ordinary slow drag, or a coasting animation — lands
+/// 2.8 px from the prediction, inside [`IN_PLACE_TOLERANCE_PX`], so it was
+/// classified as in-place; but a textured target moving 2 px still repaints
+/// ~92% of the pixels in its own region, so the gate saw `R ≈ 0.92` and
+/// discarded it. Every window, with no path back: the rate never falls while
+/// the drift continues, so the gate never re-arms, and L8 went permanently
+/// silent for exactly the slow close-range motion it measures best
+/// (project convention 2 — this is an absorbing state).
+///
+/// The discriminator is geometric rather than statistical, because the two
+/// cases differ in *shape* even when their change rates are nearly equal.
+/// Measured on the 60×40 test target:
+///
+/// | scene | merged blob extent |
+/// |---|---|
+/// | drift by 2 px | **62 × 42** — departure ∪ arrival |
+/// | drift by 5 px | **65 × 45** |
+/// | animation in place | **60 × 40** — exactly the footprint |
+///
+/// A repaint cannot exceed the footprint it repaints, so excess extent is
+/// evidence that content *left* the old position. This is the same "the spike
+/// is explained by the departure" argument the module docs make for large
+/// displacements, applied where the displacement is too small for the two
+/// regions to separate into distinct blobs.
+///
+/// *Failure mode*: a target whose animation makes it grow by ≥ 1 px in either
+/// axis (an expanding sprite) is read as having moved, and is emitted rather
+/// than blocked. Contained twice over — it must still template-verify above
+/// `MIN_SCORE` against the registered appearance, which a genuinely different
+/// animation frame fails (see
+/// `dynamic_content_at_a_known_position_is_blocked`), and the reported centre
+/// is the *verified match position*, not the blob centre, so even a mildly
+/// grown sprite reports where it actually is.
+const DEPARTURE_EXCESS_PX: i64 = 1;
 /// Half-extent of the tight template-verification search around a candidate
 /// blob's expected top-left corner, in capture pixels.
 const VERIFY_HALF_PX: f64 = 8.0;
@@ -201,21 +278,39 @@ impl EdgeSync {
         // template top-left (blob center minus the template half-size).
         let mut best_moved: Option<EdgeSyncObservation> = None;
         let mut best_in_place: Option<EdgeSyncObservation> = None;
+        // Set when some candidate blob is larger than the template footprint:
+        // geometric evidence of a departure too small to split the blobs.
+        // See `DEPARTURE_EXCESS_PX`.
+        let mut saw_departure_excess = false;
         for bb in candidates {
-        // A blob can be a strict subset of the true footprint: pixels whose
-        // luma sits within CHANGE_THRESHOLD of the background never cross
-        // into the diff mask, so the blob-derived expected top-left can
-        // miss the true one by up to half the missing extent per axis. Grow
-        // the tight window by that deficit so the search still contains the
-        // target; a full-footprint blob yields grow = 0 and stays tight.
-        let grow_x = (verify.width as f64 - bb.width() as f64) / 2.0;
-        let grow_y = (verify.height as f64 - bb.height() as f64) / 2.0;
+        // The verification window is anchored at the template top-left
+        // implied by the blob center, then grown by half the blob's size
+        // *mismatch* on either axis. Both directions of mismatch matter:
+        //
+        // * **Blob smaller than the template** (a strict subset of the true
+        //   footprint: pixels whose luma sits within CHANGE_THRESHOLD of the
+        //   background never enter the diff mask). The implied top-left can
+        //   miss the true one by up to half the missing extent.
+        // * **Blob larger than the template** — the merged departure+arrival
+        //   case. The merged bbox spans `(w + dx) × (h + dy)`, so its center
+        //   sits midway between the two footprints and the implied top-left
+        //   misses the arrival by exactly `dx/2` — i.e. half the excess.
+        //
+        // Using `abs` covers both; a full-footprint, unmerged blob yields
+        // grow = 0 and the window stays tight.
+        //
+        // *Failure mode*: a larger window admits more chances for a spurious
+        // peak. Contained by the score floor below — the window is still
+        // bounded by the blob's own size, and the match must correlate with
+        // the caller's own render, not merely land somewhere plausible.
+        let grow_x = (verify.width as f64 - bb.width() as f64).abs() / 2.0;
+        let grow_y = (verify.height as f64 - bb.height() as f64).abs() / 2.0;
         let roi = template::SearchRoi {
             center: (
                 bb.center().x - verify.width as f64 / 2.0,
                 bb.center().y - verify.height as f64 / 2.0,
             ),
-            half: VERIFY_HALF_PX + grow_x.max(grow_y).max(0.0),
+            half: VERIFY_HALF_PX + grow_x.max(grow_y),
         };
             let Some(m) = template::match_template(frame, verify, roi) else {
                 continue;
@@ -228,6 +323,11 @@ impl EdgeSync {
                 confidence: ((m.score - MIN_SCORE) / (FULL_SCORE - MIN_SCORE))
                     .clamp(0.0, 1.0) as f32,
             };
+            if bb.width() - verify.width as i64 >= DEPARTURE_EXCESS_PX
+                || bb.height() - verify.height as i64 >= DEPARTURE_EXCESS_PX
+            {
+                saw_departure_excess = true;
+            }
             let displaced = m.center.distance(predicted) > IN_PLACE_TOLERANCE_PX;
             if displaced {
                 if best_moved.as_ref().is_none_or(|b| obs.confidence > b.confidence) {
@@ -245,8 +345,17 @@ impl EdgeSync {
             (Some(m), _) => EdgeSyncOutcome::Measured(m),
             // Target re-confirmed where we thought, content static.
             (None, Some(m)) if verdict.passed => EdgeSyncOutcome::Measured(m),
-            // Target still present but its content changed too fast:
-            // DYNAMIC discard per spec §6.1, 2-pass resume applies.
+            // Verified in place, gate closed — but a candidate blob was
+            // *larger than the template footprint*, which a repaint cannot
+            // produce. Slow drift lands here: the match sits within
+            // IN_PLACE_TOLERANCE_PX of the prediction, yet the merged
+            // departure ∪ arrival blob gives away that the target moved.
+            // Blocking it is the absorbing state documented on
+            // DEPARTURE_EXCESS_PX.
+            (None, Some(m)) if saw_departure_excess => EdgeSyncOutcome::Measured(m),
+            // Target still present but its content changed too fast to be
+            // explained: DYNAMIC discard per spec §6.1, 2-pass resume
+            // applies.
             (None, Some(_)) => EdgeSyncOutcome::Blocked { changed_ratio: ratio },
             // Changed content, nothing verified, and the rate itself is
             // dynamic: discard.
@@ -687,6 +796,120 @@ mod tests {
     }
 
     #[test]
+    fn small_displacements_are_measured_not_dropped() {
+        // Audit blind spot (project convention 6): every earlier test moved
+        // the target far enough for the departure and arrival regions to
+        // separate into two blobs. Below that separation they MERGE into one
+        // blob of (TW+dx) x (TH+dy), and the old AREA_MAX_FACTOR = 2.5
+        // comment claimed such blobs were rejected — for a 60x40 target the
+        // merged area only crosses 2.5x at a 29 px displacement, so small
+        // moves were never rejected at all, while moves of 29..60 px were
+        // silently discarded. Both halves of that are now wrong on purpose:
+        // merged blobs are admitted and resolved by template verification.
+        for d in [2i64, 5, 12, 24, 30, 45] {
+            let mut es = EdgeSync::new();
+            let region = bbox(200, 150);
+            let roi = expanded(region, 96);
+            let tpl = template(0);
+            let t0 = Instant::now();
+            assert_eq!(
+                es.observe(&scene(Some((200, 150)), 0), region, roi, &tpl, t0),
+                EdgeSyncOutcome::NoReference
+            );
+
+            let o = es.observe(
+                &scene(Some((200 + d, 150 + d)), 0),
+                region,
+                roi,
+                &tpl,
+                t0 + Duration::from_millis(600),
+            );
+            let EdgeSyncOutcome::Measured(m) = o else {
+                panic!("displacement of {d} px produced {o:?} instead of a measurement");
+            };
+            let c = m.bbox.center();
+            let (want_x, want_y) = (
+                (200 + d) as f64 + TW as f64 / 2.0,
+                (150 + d) as f64 + TH as f64 / 2.0,
+            );
+            assert!(
+                (c.x - want_x).abs() < 1.5 && (c.y - want_y).abs() < 1.5,
+                "displacement {d}: center {c:?}, expected ({want_x}, {want_y})"
+            );
+        }
+    }
+
+    #[test]
+    fn sustained_slow_drift_never_silences_the_layer() {
+        // Terminal-state regression (project convention 2). A target drifting
+        // 2 px per window stays inside IN_PLACE_TOLERANCE_PX of the
+        // prediction while repainting ~92% of its own region, so the gate
+        // verdict is DYNAMIC forever. The old code discarded every one of
+        // those windows: an absorbing state with no path back, because the
+        // change rate never falls while the drift continues. The geometric
+        // departure test (DEPARTURE_EXCESS_PX) must keep the layer measuring
+        // for the whole run, not merely for the first window.
+        let mut es = EdgeSync::new();
+        let tpl = template(0);
+        let t0 = Instant::now();
+        let (mut x, mut y) = (200i64, 150i64);
+        let mut region = bbox(x, y);
+        assert_eq!(
+            es.observe(&scene(Some((x, y)), 0), region, expanded(region, 96), &tpl, t0),
+            EdgeSyncOutcome::NoReference
+        );
+
+        let mut measured = 0;
+        for step in 1..=12 {
+            x += 2;
+            y += 2;
+            let roi = expanded(region, 96);
+            let o = es.observe(
+                &scene(Some((x, y)), 0),
+                region,
+                roi,
+                &tpl,
+                t0 + Duration::from_millis(600 * step),
+            );
+            match o {
+                EdgeSyncOutcome::Measured(m) => {
+                    measured += 1;
+                    let c = m.bbox.center();
+                    let (wx, wy) = (x as f64 + TW as f64 / 2.0, y as f64 + TH as f64 / 2.0);
+                    assert!(
+                        (c.x - wx).abs() < 1.5 && (c.y - wy).abs() < 1.5,
+                        "step {step}: center {c:?}, expected ({wx}, {wy})"
+                    );
+                    region = m.bbox;
+                }
+                other => panic!("step {step} of a slow drag produced {other:?}"),
+            }
+        }
+        assert_eq!(measured, 12, "the layer must not go silent mid-drag");
+    }
+
+    #[test]
+    fn merged_blob_area_stays_within_the_bound() {
+        // Terminal check on the constant itself: two template-sized regions
+        // that still touch span at most 2w x 2h = 4x the expected area, so
+        // AREA_MAX_FACTOR must be >= 4 for merged blobs to be admissible at
+        // every displacement up to separation.
+        const _: () = assert!(
+            AREA_MAX_FACTOR >= 4.0,
+            "AREA_MAX_FACTOR must admit merged departure+arrival blobs (>= 4x)"
+        );
+        let expected = (TW * TH) as f64;
+        for (dx, dy) in [(1, 1), (TW as i64 - 1, TH as i64 - 1)] {
+            let merged = (TW as i64 + dx) as f64 * (TH as i64 + dy) as f64;
+            assert!(
+                merged <= expected * AREA_MAX_FACTOR,
+                "merged blob at ({dx}, {dy}) has area {merged}, bound {}",
+                expected * AREA_MAX_FACTOR
+            );
+        }
+    }
+
+    #[test]
     fn geometry_change_restarts_the_reference() {
         let mut es = EdgeSync::new();
         let region = bbox(200, 150);
@@ -710,3 +933,4 @@ mod tests {
         );
     }
 }
+

@@ -65,9 +65,9 @@ fn main() {
                 frame.capture_size().1,
                 m.linear_scale()
             );
+            let [a, b, c, d, e, f] = m.coefficients();
             println!(
-                "[stage 3] map: [{:.4} {:.4} {:.2}; {:.4} {:.4} {:.2}]",
-                m.a, m.b, m.c, m.d, m.e, m.f
+                "[stage 3] map: [{a:.4} {b:.4} {c:.2}; {d:.4} {e:.4} {f:.2}]"
             );
             println!(
                 "[stage 3] quality: rms {:.3}px, max {:.3}px, verify {:.3}px, consistency {:.3}px, samples {}, passes {}",
