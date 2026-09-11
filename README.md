@@ -5,6 +5,7 @@
 > **想读懂设计** → [`docs/spec.md`](./docs/spec.md)（唯一规范源）
 > **想写后端 / 移植平台** → [`docs/backend-contract.md`](./docs/backend-contract.md)（后端契约）+ [`docs/layer-shell-primer.md`](./docs/layer-shell-primer.md)（Wayland 原语手册）
 > **想改代码** → [`AGENTS.md`](./AGENTS.md)（项目约定，每条都对应一次真实踩坑）
+> **想提新思路** → [`docs/proposals/`](./docs/proposals/)（提案 → 草案 → 方案，提案先审）
 > **想考古** → [`docs/history/`](./docs/history/)（前身草案，均已被取代，勿据此实现）
 
 fidus 是一个纯 Rust 定位库：在平台窗口坐标 API 不可信的环境下，它**不封装任何原生坐标 API**，而是用最基础的合成器原语（`wl_surface` / `wl_shm` / layer-shell、通用截屏）投射自己的标记、截取自己的屏幕、解算自己的坐标系。**定位什么由调用方决定；fidus 提供地图。**
