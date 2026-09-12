@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! End-to-end fusion tests: L1 + L8 + constant-velocity track against a
 //! scripted fake output with an injectable clock.
 

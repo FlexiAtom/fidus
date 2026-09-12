@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! Protocol session: connection, registry binding, and a timeout-capable
 //! event loop.
 //!

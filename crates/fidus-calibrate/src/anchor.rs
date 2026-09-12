@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! L0 Anchor — the universal fallback calibrator (spec §4.3).
 //!
 //! Four high-saturation solid sentinels are projected **simultaneously** at

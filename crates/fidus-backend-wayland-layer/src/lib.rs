@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! fidus backend for Wayland compositors with layer-shell support
 //! (wlroots-like: Niri / Sway / Hyprland, KDE Plasma, partial GNOME).
 //!

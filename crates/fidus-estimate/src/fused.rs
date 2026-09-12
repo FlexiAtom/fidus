@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! L7 fusion (P2-c): L1 template matching + L8 gated differencing into a
 //! constant-velocity track.
 //!

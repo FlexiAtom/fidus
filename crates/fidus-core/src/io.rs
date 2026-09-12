@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! Calibration I/O session: the only two primitives fidus ever uses —
 //! projecting known markers and capturing the screen — behind one trait.
 //!

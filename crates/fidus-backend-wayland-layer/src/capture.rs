@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! Screen capture via `zwlr_screencopy_manager_v1` — the generic capture
 //! primitive (spec §1.1 原则二：通用截屏). It copies composited output pixels
 //! into an `wl_shm` buffer; it reads no window geometry of any kind.

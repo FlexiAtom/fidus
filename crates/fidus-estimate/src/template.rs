@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! L1 template tracking: normalized cross-correlation over a region of
 //! interest, coarse-to-fine with subpixel refinement.
 //!

@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! `wl_shm` allocation helpers: memfd-backed shared memory pools and mmaps.
 
 use std::fs::File;

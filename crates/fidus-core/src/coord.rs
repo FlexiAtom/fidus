@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! Coordinate primitives for fidus' own frame.
 //!
 //! [`LogicalPoint`] and [`PhysicalPoint`] are *fidus-frame* quantities, not

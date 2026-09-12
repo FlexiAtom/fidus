@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 use fidus_core::coord::{AffineTransform, LogicalPoint, PhysicalPoint, SolveError};
 use fidus_core::frame::{CalibrationQuality, CoordinateFrame};
 

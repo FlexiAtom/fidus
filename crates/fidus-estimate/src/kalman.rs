@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! Constant-velocity Kalman tracking (L4 motion model + L7 fusion substrate).
 //!
 //! Each axis runs an independent 1D filter over state `[position, velocity]`

@@ -17,7 +17,7 @@ restore() {
 trap restore EXIT INT TERM
 
 run_once() {
-  timeout 90 cargo run --release -q -p fidus --bin fidus-calibrate 2>&1 \
+  timeout 90 cargo run --release -q -p fidus --bin fidus-live-calibrate 2>&1 \
     | grep -E "calibrated in|quality:|map:|ERROR|rror|failed" | head -5
 }
 

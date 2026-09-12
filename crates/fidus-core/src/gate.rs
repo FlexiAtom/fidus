@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! Gate — the "can fidus be used here?" programmable interface (spec §5).
 
 use crate::calibration::{CalibrationMethod, CalibrationStatus, UnsupportedReason};

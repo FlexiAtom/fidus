@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! Marker projection via a bare `wl_surface` + `zwlr_layer_shell_v1` overlay.
 //!
 //! Constraints verified on Niri (spec §4.1 and the attached verification

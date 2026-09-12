@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! L9 Crosshair — the flagship calibrator (spec §4.1).
 //!
 //! Principle: project a marker at *known* layer-shell margins

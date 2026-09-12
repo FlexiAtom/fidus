@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! The calibrated coordinate frame (spec §4.4 "交给 C 层做增量追踪").
 
 use std::time::SystemTime;

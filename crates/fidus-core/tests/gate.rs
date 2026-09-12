@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 use fidus_core::calibration::{CalibrationMethod, CalibrationStatus, UnsupportedReason};
 use fidus_core::env::{CompositorKind, EnvironmentContext, PermissionState};
 use fidus_core::gate::{Gate, ProbeGate};

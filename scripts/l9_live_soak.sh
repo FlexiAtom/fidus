@@ -31,7 +31,7 @@ fi
 run_one() { # scale, index
   niri msg output eDP-1 scale "$1" >/dev/null 2>&1
   sleep 1.2
-  timeout 90 ./target/release/fidus-calibrate > "$OUT/s$1_$2.log" 2>&1
+  timeout 90 ./target/release/fidus-live-calibrate > "$OUT/s$1_$2.log" 2>&1
 }
 
 for i in $(seq "$N"); do

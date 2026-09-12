@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! # fidus — Zero-Trust Coordinate positioning engine
 //!
 //! fidus locates things on screen for environments where platform

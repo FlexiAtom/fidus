@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! C-layer estimators for fidus.
 //!
 //! # Status (spec §8 priorities)

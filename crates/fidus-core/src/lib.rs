@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! # fidus-core — the Zero-Trust Coordinate core
 //!
 //! fidus is a positioning engine for environments where platform window-coordinate

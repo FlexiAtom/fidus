@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! fidus backend for X11 displays (real X servers, and XWayland screens
 //! where the X server actually composes a root image).
 //!

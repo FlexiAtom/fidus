@@ -245,6 +245,8 @@ fidus **不是兜底路径，它就是路径**。类型名从 `FallbackEngine` �
 | 修复前 | — | **12/12 失败** |
 | 修复后 | **0/15** | **0/15** |
 
+**实测环境边界**：当前实机数字来自 Arch Linux + Niri + 接近默认的 kitty（kitty 配置只有 fish shell；Niri 使用默认动画/焦点环，并运行 waybar、mako、swww）。这足以验证“真实使用中的窗口会重绘”，但不外推到透明/模糊主题、复杂终端配色、视频/网页动画或其他合成器；这些场景必须单独实测。
+
 **已知精度边界（实机实测，2026-09）**：完整数据见 [`measurements/l9-fractional-scaling.md`](measurements/l9-fractional-scaling.md)。
 
 | 条件 | rms 残差 | 说明 |
@@ -510,7 +512,7 @@ impl FidusEngine {
 
 ```
 fidus-core       ✅ // 类型系统 + 三层 trait + 概率池 + 坐标空间（SolvedMap 封印）
-fidus            ✅ // 顶层 facade：FidusBuilder + fidus-calibrate CLI
+fidus            ✅ // 顶层 facade：FidusBuilder + fidus-live-calibrate CLI
 fidus-backend-*     // （仅适配最基础合成器原语，非 API 门面）
                    ├─ wayland-layer  ✅ (wlroots/KDE/Niri)
                    ├─ x11            ✅

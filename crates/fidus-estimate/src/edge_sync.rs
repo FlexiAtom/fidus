@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! L8 EdgeSync — displacement measurement by low-frequency frame
 //! differencing (spec §3.2, §6.1).
 //!

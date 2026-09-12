@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! fidus-calibrate — B-layer calibration strategies (spec §4).
 //!
 //! Available strategies:

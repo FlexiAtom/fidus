@@ -275,7 +275,7 @@ fn pick_marker_color(baseline: &Frame) -> Option<[u8; 4]>;
 - [x] 真实桌面（有窗口活动）下 scale=1 与 1.25 各 15 次，**失败 0 次** — 噪声底 9/29 确认桌面确实在动
 - [x] 仿真回归测试在改动前**确实失败**（变异验证）— 见下方"变异验证结果"
 - [x] scale=1 残差仍为 **0.000px**，测试从 98 增至 **100** 全绿
-- [x] `cargo clippy` 零警告（`cargo doc` 的 1 条是改动前就存在的 bin/lib 同名冲突，与本次无关）
+- [x] `cargo clippy` 零警告，`cargo doc --workspace --no-deps` 零警告 — 通过将 live smoke-test 二进制改名为 `fidus-live-calibrate` 清除了 bin/lib 同名冲突
 - [x] 每个新增判据都有 AGENTS §1 的三段式失效模式注释
 - [x] 实机验证按 §4.7 协议，脚本固化为 `scripts/l9_live_soak.sh`
 
@@ -290,7 +290,13 @@ fn pick_marker_color(baseline: &Frame) -> Option<[u8; 4]>;
 
 ---
 
-## 7. 明确不做
+## 7. 实测环境与外推边界
+
+本次实机数据来自 Arch Linux + Niri + 接近默认的 kitty：kitty 配置只有 `shell /usr/bin/fish`，没有透明度、主题、阴影等美化设置；Niri 配置仍使用默认动画和焦点环，并运行 waybar、mako、swww。它验证了“用户正在使用电脑时，普通窗口会重绘”这一问题，但**不代表所有桌面像素行为相同**。
+
+尚未由本次数据覆盖的场景包括：透明/模糊/阴影主题、复杂终端配色、视频或网页动画、频繁 compositor 动画、其他 Wayland 合成器。它们不是设计上的豁免；它们是后续实机验证矩阵中的场景。颜色自适应与多帧互证应降低风险，但持续且同色的干扰仍按 §6 的诚实失败处理。
+
+## 8. 明确不做
 
 - **不碰投射端取整**（§4.5）。
 - **不删面积先验**（§4.4）。

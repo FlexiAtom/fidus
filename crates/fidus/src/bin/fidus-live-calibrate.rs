@@ -1,4 +1,7 @@
-//! fidus-calibrate — live smoke test: the full calibration loop on
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
+//! fidus-live-calibrate — live smoke test: the full calibration loop on
 //! whatever backend the builder picks (layer-shell first, then X11).
 //!
 //! Stages (each prints before the next runs, so failures localize):

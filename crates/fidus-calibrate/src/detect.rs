@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! Marker detection: frame-difference + connected components.
 //!
 //! The detector compares a capture against a baseline (marker hidden) and

@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! End-to-end simulation of the L9 pipeline against a fake compositor.
 //!
 //! `FakeIo` models what the real backend + compositor do — with the quirks

@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! L0 Anchor end-to-end simulation: a fake X-like root with multi-marker
 //! projection, plus the adversarial cases the protocol's four defenses
 //! exist for — static sentinel-colored wallpaper patches (must be harmless),

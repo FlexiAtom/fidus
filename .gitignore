@@ -3,3 +3,7 @@ fidus_dump.txt
 
 # 实机测试产物
 .soak*/
+
+# 本地临时分析/探针输出
+.probe/
+

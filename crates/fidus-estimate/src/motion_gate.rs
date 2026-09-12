@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! MotionGate — the L8 input gate from spec §6.1.
 //!
 //! Before an EdgeSync bbox measurement enters the pool, the target region's

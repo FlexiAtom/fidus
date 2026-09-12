@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! Estimator outputs and errors (C layer, spec §3.2 / §6).
 
 use std::time::Instant;

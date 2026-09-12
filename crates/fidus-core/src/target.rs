@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! The tracking-target contract (C layer, spec §3.2 / §6.1).
 //!
 //! The caller tells fidus *what* to locate by handing over its own offscreen

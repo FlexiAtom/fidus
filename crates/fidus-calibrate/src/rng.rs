@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! Tiny deterministic RNG (xorshift64*) for marker jitter and verification
 //! positions. Seeded from config + wall-clock nanos at runtime; fixed seeds
 //! in tests keep simulations reproducible.

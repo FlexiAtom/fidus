@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! The three-layer traits and the [`FidusEngine`] shell (spec §3, §6).
 
 use crate::calibration::{CalibrationError, CalibrationMethod};

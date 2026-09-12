@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! ScreenClassifier — automatic dynamic-background detection (spec v0.4 L8
 //! "动态壁纸检查", carried into v0.5.1 as the source of
 //! `EnvironmentContext::is_dynamic_wallpaper`).

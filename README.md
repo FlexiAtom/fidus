@@ -103,7 +103,7 @@ $ xdotool search --name "." | wc -l
 更进一步，rootless XWayland 连根窗口的画面都没有：
 
 ```bash
-$ FIDUS_BACKEND=x11 cargo run -p fidus --bin fidus-calibrate
+$ FIDUS_BACKEND=x11 cargo run -p fidus --bin fidus-live-calibrate
 [stage 1] backend init failed (X11): environment lacks required primitives:
   root window is not capturable (rootless XWayland?): X11Error { error_kind: Match,
   major_opcode: 73, request_name: Some("GetImage") }
@@ -197,9 +197,9 @@ crates/
 实机冒烟测试（Wayland 下屏幕上会闪现约两秒的品红色标记方块；X11 下四角闪现四色哨兵）：
 
 ```bash
-cargo run --release -p fidus --bin fidus-calibrate
+cargo run --release -p fidus --bin fidus-live-calibrate
 # 强制后端 / 偏好校准器（Gate 仍有最终决定权）：
-FIDUS_BACKEND=x11 FIDUS_METHOD=anchor cargo run --release -p fidus --bin fidus-calibrate
+FIDUS_BACKEND=x11 FIDUS_METHOD=anchor cargo run --release -p fidus --bin fidus-live-calibrate
 ```
 
 四个阶段分别验证：后端连接 + 环境探测 → 所有方法的 Gate 回答 → 完整校准 → teardown（`niri msg layers | grep fidus` / `xwininfo -root -tree` 应无 fidus 窗口）。
@@ -263,9 +263,10 @@ cargo clippy   # 零警告
 - **L10 GradientField**：**已否决**——提案阶段实测表明「对数螺旋 + 锁定主频」自相矛盾，且相位法无法独立消歧（见 [spec §4.2](./docs/spec.md)）。Gate 诚实返回 `FeatureDisabled`。
 - **可定位性检查是固定半径采样**（2/4/8/16px）：周期恰好落在采样半径之间的图案（如在 6px 自相似但 4px/8px 不）可能漏过。这被**容纳**而非致命——此类模板在真实位置仍有正确的峰，歧义只存在于固定偏移的等优候选之间，L7 的运动模型会把由此产生的跳变判为与轨迹不符。必须拦的渐变与近匀色**在所有半径上都歧义**，不可能漏过。
 - **持续覆盖屏幕的干扰**：L9 的三重判据（差分 ∧ 颜色 ∧ 多帧互证）针对的是**间歇性**干扰——别的窗口重绘是时间上的事件，再看一次就过去了。若有**持续数秒且与自适应标记色同色**的大面积内容（例如全屏播放一段恰好同色的视频），三条判据会同时失效。此时校准**诚实失败**（`Ambiguous` / 残差超限），不产出错误坐标。
+- **实机外推边界**：当前 Niri 实测环境是接近默认的无美化 kitty（配置只有 `shell /usr/bin/fish`），Niri 使用默认动画/焦点环并运行 waybar、mako、swww。它能覆盖真实窗口重绘，但不代表带透明度、阴影、复杂主题终端、视频/网页动画或其他合成器的像素行为；这些场景必须分别实测，不能把本机 0/30 当成普遍保证。
 - **GNOME（无 layer-shell）**：需要 `fidus-backend-wayland-portal`，未实现。
 - **Y_INVERT**：screencopy 的 Y 反转已处理并有单测，但仅在实机（Niri 不置位该标志）验证过非反转路径。
 
 ## 许可
 
-MIT OR Apache-2.0
+Apache-2.0

@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! Diagnostic: projects one marker and reports what the capture actually
 //! contains — edge sharpness, changed-pixel count, fill ratio.
 //!

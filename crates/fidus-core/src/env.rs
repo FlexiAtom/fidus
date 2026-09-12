@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! Environment description and permission model (spec §5.2, §5.3).
 
 /// Coarse compositor identification for diagnostics and strategy hints.

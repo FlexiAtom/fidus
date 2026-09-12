@@ -17,7 +17,7 @@ for s in 1 1.25 1.5 1.75 2; do
   fail=0
   echo "=== scale=$s ==="
   for i in $(seq "$N"); do
-    out=$(timeout 90 cargo run --release -q -p fidus --bin fidus-calibrate 2>&1 \
+    out=$(timeout 90 cargo run --release -q -p fidus --bin fidus-live-calibrate 2>&1 \
           | grep -E "quality:|calibration failed" | head -1)
     if echo "$out" | grep -q "failed"; then
       fail=$((fail+1)); echo "  #$i FAILED"

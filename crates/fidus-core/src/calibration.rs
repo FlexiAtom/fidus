@@ -1,3 +1,6 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
 //! Calibration methods, statuses and errors (spec §5.1).
 
 use crate::env::PermissionType;
