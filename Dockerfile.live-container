@@ -1,0 +1,45 @@
+# syntax=docker/dockerfile:1
+# Debian-based live image. Build with:
+# docker build --build-arg DEBIAN_IMAGE_DIGEST=sha256:<reviewed-digest> \
+#   -f Dockerfile.live-container -t fidus-live:local .
+# The default registry is DaoCloud's Docker Hub mirror, not Tsinghua.
+ARG DEBIAN_IMAGE=docker.m.daocloud.io/library/debian:12-slim
+ARG DEBIAN_IMAGE_DIGEST=sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
+FROM ${DEBIAN_IMAGE}@${DEBIAN_IMAGE_DIGEST} AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    RUSTUP_HOME=/opt/rustup \
+    RUSTUP_DIST_SERVER=https://rsproxy.cn \
+    RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup \
+    CARGO_HOME=/opt/cargo \
+    CARGO_NET_RETRY=5 \
+    PATH=/opt/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+RUN apt-get -o Acquire::Retries=5 update \
+    && apt-get install --yes --no-install-recommends \
+       bash ca-certificates curl gcc libc6-dev pkg-config libwayland-dev libx11-dev \
+       libx11-xcb-dev libxcb1-dev libxcb-shm0-dev libxcb-randr0-dev \
+       libxcb-xfixes0-dev libxcb-shape0-dev libxcb-render0-dev libxcb-sync-dev \
+       libxcb-present-dev libxkbcommon-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl --http1.1 --retry 5 --retry-all-errors --proto '=https' --tlsv1.2 --fail --location https://rsproxy.cn/rustup-init.sh \
+       | sh -s -- -y --profile minimal --default-toolchain 1.86.0 \
+    && for attempt in 1 2 3 4 5; do rustup component add clippy rustfmt && break; test "$attempt" = 5 && exit 1; sleep 2; done
+
+WORKDIR /workspace
+COPY . .
+RUN cargo build --locked --release -p fidus --bin fidus-live-calibrate \
+    && cargo build --locked --release -p fidus-test --bin fidus-test
+
+FROM ${DEBIAN_IMAGE}@${DEBIAN_IMAGE_DIGEST}
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC
+RUN apt-get -o Acquire::Retries=5 update \
+    && apt-get install --yes --no-install-recommends \
+       ca-certificates libgcc-s1 libc6 libwayland-client0 libx11-6 libxkbcommon0 \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /workspace/target/release/fidus-live-calibrate /usr/local/bin/fidus-live-calibrate
+COPY --from=builder /workspace/target/release/fidus-test /usr/local/bin/fidus-test
+
+# The host runner supplies the display session explicitly. This image itself
+# has no display socket, device, HOME, or compositor control.
+ENTRYPOINT ["fidus-test"]

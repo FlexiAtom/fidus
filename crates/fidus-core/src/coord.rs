@@ -391,8 +391,8 @@ fn solve3(m: [[f64; 3]; 3], rhs: [f64; 3]) -> Option<[f64; 3]> {
             }
             let factor = a[r][col] / a[col][col];
             let pivot_row = a[col];
-            for c in col..3 {
-                a[r][c] -= factor * pivot_row[c];
+            for (c, value) in pivot_row.iter().enumerate().skip(col) {
+                a[r][c] -= factor * value;
             }
             b[r] -= factor * b[col];
         }

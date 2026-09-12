@@ -44,7 +44,7 @@ fidus 的独立性**不是可选的风格偏好，而是被平台 API 坑出来�
 > 全部坐标能力仅依赖**全平台最基础、最普适的合成器原语**（`wl_surface` / `wl_shm` / layer-shell、X11 基本绘制、Windows GDI、通用截屏）。不依赖任何窗口管理器的"配合"或"恩赐"。后端只适配「投射 + 截屏」两件事。
 
 **原则四 · Keep the pool pure（概率池纯净）**
-> 概率池只接收视觉与交互测量。任何平台 API 返回值**在类型层面**无法进入（§6.2）。"纯视觉"是必要条件而非充分条件——不可定位的测量与伪造无异（§6.1、§11.1）。
+> 概率池只接收视觉与交互测量。任何平台 API 返回值**在类型层面**无法进入（§6.2）。"纯视觉"是必要条件而非充分条件——不可定位的测量与伪造无异（§6.1、§12.1）。
 
 **原则五 · Calibrate, then get out（校准完即撤）**
 > 校准完成立即销毁 overlay，不常驻。fidus 是测绘队，不是房客（§4.4）。
@@ -66,7 +66,7 @@ fidus 的独立性**不是可选的风格偏好，而是被平台 API 坑出来�
 | L9 仅依赖 layer-shell 基础能力；后端只适配「投射 + 截屏」 | 原则三 |
 | 校准器建立物理坐标系而非逻辑坐标 | 原则二 |
 | `fidus-core` 公开 API 不含任何坐标类 native 输入（`SolvedMap` 封印） | 原则四（类型层面强制，§6.2） |
-| 注册期拒绝不可定位的模板（`localizability`） | 原则四（不可定位的测量与伪造无异，§11.1） |
+| 注册期拒绝不可定位的模板（`localizability`） | 原则四（不可定位的测量与伪造无异，§12.1） |
 | 校准完成立即 teardown，不常驻 | 原则五 |
 
 ---
@@ -236,7 +236,7 @@ fidus **不是兜底路径，它就是路径**。类型名从 `FallbackEngine` �
 
 > **为什么不是"重试时等一会儿"**：重绘是时间上的事件，立即重试大概率落在同一次事件内。但"等待"需要给后端加第三个原语，而规格明确只允许"投射 + 截屏"两个（§3.4）。**多帧互证用本来就要采的帧换来了同样的独立性**，不动架构约束——这与概率池"用更多证据代替更强假设"是同一个思路。
 >
-> 原实现的重试注释声称"burn a tick 让背景少发散"，实际那行 `rng.next_u64()` 耗时约 1 纳秒，**什么都没等**（§11 同型缺陷）。
+> 原实现的重试注释声称"burn a tick 让背景少发散"，实际那行 `rng.next_u64()` 耗时约 1 纳秒，**什么都没等**（§12 同型缺陷）。
 
 **实测效果**（同一台机器、屏幕有真实活动，噪声底 9/29）：
 
@@ -257,7 +257,7 @@ fidus **不是兜底路径，它就是路径**。类型名从 `FallbackEngine` �
 
 **成因是投射端的取整，不是测量端的分辨力**：上文第 3 条要求 margin 量化到整数逻辑像素（为与 backend 的 round 一致），合成器随后落到 `round(L × scale)`，与理想值差最多 0.5 物理像素。整数 scale 下 `round(L×s) ≡ L×s`，残差必然为 0——实测完全吻合（可精确落点比例 100%/25%/50%/25%/100%，对应 rms 0.000/0.089/0.141/0.208/0.000）。
 
-> **真正需要关注的是余量而非残差**：分数缩放下 `consistency` 实测最差 1.114px，门限 1.5px，**仅剩 26% 余量**；约 30 次校准中出现 2 次 `AreaMismatch` 失败。失败是**诚实的**（报错退出，不产出错误坐标，符合原则四），但可用性受损。面积先验（第 4 条）用"面积"当"是不是同一标记"的代理，正是 §11.2 记录的同型缺陷。
+> **真正需要关注的是余量而非残差**：分数缩放下 `consistency` 实测最差 1.114px，门限 1.5px，**仅剩 26% 余量**；约 30 次校准中出现 2 次 `AreaMismatch` 失败。失败是**诚实的**（报错退出，不产出错误坐标，符合原则四），但可用性受损。面积先验（第 4 条）用"面积"当"是不是同一标记"的代理，正是 §12.2 记录的同型缺陷。
 >
 > **对症方向在投射端**（允许非整数逻辑坐标，或把标记的实际取整落点作为已知量代入求解），与频域精修类方案（L10）无关——**精确地测量一个落错位置的标记，只会得到精确的错误值。**
 
@@ -284,7 +284,7 @@ fidus **不是兜底路径，它就是路径**。类型名从 `FallbackEngine` �
 
 **一条被写反的风险**（更正）：原文把"动态壁纸/视频背景的频谱污染"列为主要风险。**实测不成立**——窄带相位估计对宽带噪声天然免疫：壁纸能量摊在所有频率上，而估计只在**一个已知频点**取值。强纹理背景下误差仍为 **0.034 px**。
 
-> **教训**（已并入 §11.5 与 AGENTS §10）：**担心错了对象，比不担心更危险**——它把注意力从真正的障碍（歧义）上引开了两年。
+> **教训**（已并入 §12.5 与 AGENTS §10）：**担心错了对象，比不担心更危险**——它把注意力从真正的障碍（歧义）上引开了两年。
 
 **仍然保留的构想**（未被本次否决触及，若将来另起炉灶可参考）：
 
@@ -426,11 +426,11 @@ match availability {
 | L4 拖动位移 | ✅ | 运动模型 |
 | **任何 native API 返回值** | ❌ **类型层面禁止** | 来源不可信、量纲不可比、污染池 |
 
-> **"纯视觉"是必要条件，不是充分条件。** 不可定位的测量与伪造无异：线性渐变模板会让 NCC 在任意位置给出满分（§11.1）。因此 L1 的模板必须通过**注册期可定位性检查**（`localizability()`）才算合格输入——见下文 6.1.2。
+> **"纯视觉"是必要条件，不是充分条件。** 不可定位的测量与伪造无异：线性渐变模板会让 NCC 在任意位置给出满分（§12.1）。因此 L1 的模板必须通过**注册期可定位性检查**（`localizability()`）才算合格输入——见下文 6.1.2。
 
 #### 6.1.1 L8 EdgeSync 输入门控（MotionGate）
 
-> **本节是门控行为的唯一规范。** §11.3 只记录"当初为什么改"的踩坑叙事。
+> **本节是门控行为的唯一规范。** §12.3 只记录"当初为什么改"的踩坑叙事。
 > 早期版本的条文（仅"R 超阈即弃用"）已被 P2-f 推翻——照那样实现会**复现已修掉的吸收态缺陷**，详见下方失效模式。
 
 在每次将 L8 的 BBox 测量送入 Kalman 之前，必须通过 MotionGate 检查：以 **500ms 为窗口**（按真实时间，不按调用次数）执行帧间差分，计算目标区域像素变化率 `R ∈ [0,1]`。
@@ -451,7 +451,7 @@ threshold = min( max(baseline × 3, 15%), 50% )
 1. blob **在位移处通过模板验证**：R 的尖峰由"目标离场"解释，而到达处的内容经过了模板验证，这比统计门是更强的证据；
 2. blob **尺寸超出模板足迹**（`DEPARTURE_EXCESS_PX`）：重绘不可能超出它所重绘的足迹，超出部分即"内容离开过原位"的几何证据。
 
-*为什么必须有这两条*：缺了它们，慢速拖拽（每窗口 2px）会让 R≈0.92 恒不下降 → 门控永不 re-arm → 测量被永久丢弃，**尽管模板已验证通过**。这是典型吸收态，L8 对最常见的慢速拖拽场景永久静默。推导见 §11.3。
+*为什么必须有这两条*：缺了它们，慢速拖拽（每窗口 2px）会让 R≈0.92 恒不下降 → 门控永不 re-arm → 测量被永久丢弃，**尽管模板已验证通过**。这是典型吸收态，L8 对最常见的慢速拖拽场景永久静默。推导见 §12.3。
 
 仅当 R 超阈**且无任何有据解释**时才弃用测量、进入等待；**连续 2 个窗口通过后**才恢复输出。冷启动**不算**动态结束，首个安静窗口即可输出（2 帧规则只约束"动态结束后的恢复"）。
 
@@ -461,7 +461,7 @@ threshold = min( max(baseline × 3, 15%), 50% )
 
 #### 6.1.2 L1 目标外观准入（P2-g）
 
-`register_target` 先跑 `localizability()`：判据是**自相关随平移距离的衰减**，不是方差（方差与可定位性**反相关**，§11.1）。
+`register_target` 先跑 `localizability()`：判据是**自相关随平移距离的衰减**，不是方差（方差与可定位性**反相关**，§12.1）。
 
 - 自相似度 ≥ **0.98** → 直接拒绝；
 - 仅对起步（r=2）> 0.9 的模板，额外要求 r=2→r=16 衰减 ≥ **0.1**（低起步模板豁免此项，故 0.822 起步的纯色块+细边框不受影响）。
@@ -528,20 +528,113 @@ fidus-extras     🚧 // 业务特定项：L3 Beacon / L5 TUIScan——移出核
 
 ---
 
-## 8. 实施优先级（P0 → P3）
+## 8. P4 测试子项目方案：`fidus-test`
+
+> 来源：[`docs/proposals/P4-fidus-test-subproject.md`](proposals/P4-fidus-test-subproject.md) 与 [`docs/drafts/P4-fidus-test.md`](drafts/P4-fidus-test.md)。
+> 状态：**P4 已实现并完成发布收口**。CI 协议核心、live-host 协议桥接、本机 live-container 实测、Debian 12 runtime Release 归档和自动验证脚本均已完成；跨机器复现以基础镜像 digest、归档 SHA-256 和 image ID 为边界。本节仍不把容器宣称为显示隔离。
+
+### 8.1 目标与边界
+
+`fidus-test` 是跨环境测试工具与报告层，不是生产 backend、校准器或估计器。它只通过 fidus 正式公开 API 调用被测系统，不能复制 `detect.rs`、校准器、仿射求解或 backend 实现，也不能读取平台窗口几何作为真值。
+
+crate 内现有仿真测试继续留在生产 crate 中；`fidus-test` 负责真实环境编排、诊断、协议解析、生命周期和报告。
+
+旧的 `fidus-live-calibrate` 入口在第一阶段保留，新入口不得复制生产逻辑；旧入口只允许是共享实现的薄兼容包装。
+
+### 8.2 三种执行模式
+
+| 模式 | 作用 | 显示会话 | 输出修改权 |
+|---|---|---|---|
+| `ci` | 固定构建、workspace 检查、协议/报告单测 | 无 | 无 |
+| `live-host` | 用户正在使用的真实桌面测试 | 宿主会话 | 仅显式授权 |
+| `live-container` | 验证容器进入宿主显示会话 | 显式挂载 | 容器无权修改，由宿主 runner 独占 |
+
+三种模式必须分开报告和统计。容器不等于显示隔离；挂载 Wayland/X11 socket 后，宿主 compositor 和真实桌面仍是信任边界。
+
+`ci` 默认不挂载 `$XDG_RUNTIME_DIR`、Wayland/X11 socket、整个 HOME 或 `/dev/dri`。`live-container` 只允许最小显式挂载，默认非 root，不授予 privileged，不默认挂 `/dev/dri`。
+
+实施顺序固定为：`ci → live-host → live-container`。`live-container` 首轮只验证入口兼容性，不能替代 `live-host` 的真实性能结论。
+
+### 8.3 Output mutation 与恢复
+
+任何会修改 scale/transform 的命令都必须由调用方主动传入 `--allow-output-mutation`。没有该门，不得修改用户当前 compositor 配置。
+
+只有宿主 runner 拥有 output mutation authority。恢复状态机必须记录不可伪造的原值快照：`output_id`、原始 `scale`、原始 `transform` 和读取时间；同一 output 在一次 run 内不得改变身份。宿主 runner 必须用锁拒绝并发 mutation runner，不能让两个进程互相覆盖恢复值。
+
+状态顺序固定为：`ReadOriginal → AppliedAndReadBack → Running → RestoreRequested → RestoredAndReadBack`。任何子进程启动失败、测试失败或正常退出都先进入 `RestoreRequested`；恢复失败覆盖原始测试结果，最终为 `RecoveryUnverified`。只有读回值逐字段等于原值才可报告恢复成功。
+
+容器 runner 不执行 compositor 控制命令，也不拥有第二个恢复器。正常退出、SIGINT、超时和子进程异常必须测试恢复路径；SIGKILL、宿主崩溃和 compositor 重启后的状态不可证明，必须报告 `RecoveryUnverified`，不得声称恢复成功。
+
+### 8.4 机器可读结果协议（v1，冻结）
+
+在人读日志之外，测试 binary 输出版本化行式 key-value。**一行是一个独立记录；同一运行通过 `run_id` 关联。**
+
+公共字段（每一行都必须有）：
+
+```text
+FIDUS_RESULT version=1 kind=<kind> run_id=<token> status=<status> execution_mode=<mode>
+```
+
+`kind` 只有以下四种：
+
+| kind | 必需字段 | 允许 status | 语义 |
+|---|---|---|---|
+| `environment` | `backend compositor output scale transform` | `ready`, `unavailable` | 测试前环境事实；不是坐标真值 |
+| `calibration` | `backend method`；成功时另有 `rms_residual_px verification_max_err_px consistency_max_err_px` | `ok`, `failed` | fidus 本次校准结果 |
+| `lifecycle` | `teardown`、`recovery` | `ok`, `failed`, `unverified` | overlay teardown 与宿主恢复证据 |
+| `summary` | `records_total records_ok records_failed` | `ok`, `failed`, `harness_error` | 一次 run 的唯一终态 |
+
+固定示例：
+
+```text
+FIDUS_RESULT version=1 kind=environment run_id=r01 status=ready execution_mode=live-host backend=wayland compositor=niri output=eDP-1 scale=1.25 transform=normal
+FIDUS_RESULT version=1 kind=calibration run_id=r01 status=ok execution_mode=live-host backend=wayland method=crosshair rms_residual_px=0.203 verification_max_err_px=0.731 consistency_max_err_px=0.856
+FIDUS_RESULT version=1 kind=lifecycle run_id=r01 status=ok execution_mode=live-host teardown=confirmed recovery=not_requested
+FIDUS_RESULT version=1 kind=summary run_id=r01 status=ok execution_mode=live-host records_total=3 records_ok=3 records_failed=0
+```
+
+协议规则：
+
+- 行首固定为 `FIDUS_RESULT `；公共字段唯一且必需；
+- `run_id` 是非空 ASCII token，同一 run 的所有记录必须一致；
+- key 只允许 `[a-z0-9_]+`，value 第一版只允许无空格 ASCII token；
+- 版本未知、kind 未知、status 不在该 kind 的允许集合、重复 key、缺字段、非法数值、run_id 不一致或缺少唯一 `summary`，均为 `HarnessError`；
+- `summary` 是 run 的唯一终态；`records_total/ok/failed` 只统计 summary 之前的业务记录，不把 summary 自身计入；没有 summary 不能把 run 算作通过或失败；
+- `environment=unavailable`、`lifecycle recovery=unverified` 是测试工具/环境结果，不计入 fidus 校准失败率，但会使场景验收失败；
+- 普通人读日志可以保留，但不能被当成协议记录；第一版不引入 serde/JSON 依赖。
+
+`teardown=confirmed` 只表示 fidus 自己的 `CalibrationIo::destroy_projector` 返回成功并完成内部 teardown 路径；它**不是**通过 `niri msg layers`、`xwininfo` 或其他窗口几何查询证明的。外部平台检查只能作为人工诊断日志，不能进入协议真值。
+
+
+### 8.5 实施选择
+
+实现载体已按职责分层审查，脚本、专用 crate 与容器**共存而非三选一**：shell 负责宿主编排、compositor 控制、容器启动和恢复；`fidus-test` 负责协议、解析、报告、退出语义和场景模型；容器负责固定 CI toolchain/系统包，或显式承载 live binary。真正被否决的是单层包办一切、继续把工具堆入 `fidus` 伞 crate，以及高权限万能容器。因此采用 `fidus-test + ci/live-host/live-container`，三种模式分开报告与统计。
+
+### 8.6 实施阶段与剩余门槛
+
+CI 协议核心（独立 crate、feature forwarding、严格 parser、run summary 校验）与 live-host 协议桥接已实现并通过 workspace test/clippy/doc；live-container 已用本机临时实验镜像真实访问当前 Wayland 会话并完成校准；正式镜像现在统一为 Debian 12 slim 的 pinned multi-stage 构建，并提供 `fidus-live-debian12.tar.zst` Release 归档及 SHA-256/image ID 校验文件，协议记录中的 `execution_mode=live-container` 已由宿主 parser 验证。不同 UID 会在 backend 初始化阶段得到 `EnvironmentUnavailable`，缺 socket 得到 `EnvironmentUnavailable`，非法 runtime 得到 `HarnessError`；宿主参数契约也有自动测试。正式 Debian runtime 镜像已导出为 `fidus-live-debian12.tar.zst`；固定 digest、image ID、归档 SHA-256 和离线协议 smoke 均有对应 Release 资产。CI pinned 镜像已完成 build/run：build 阶段使用约五次网络重试预热依赖，run 阶段使用 `network=none`；CI 的 target/cache 保持可写以执行 Cargo build script，live-container 则使用只读 rootfs 和 noexec tmpfs。
+
+P4 已完成的门槛包括 feature 构建、协议单测、双入口兼容、Debian 镜像 build/run、Release 归档校验和 live-container 权限实验。output mutation authority 与完整恢复状态机仍是后续独立工作，不能因 P4 完成而宣称已经实现。
+
+所有未通过的环境仍应报告 `EnvironmentUnavailable`，不能伪装成通过。
+
+---
+
+## 9. 实施优先级（P0 → P4）
 
 | 阶段 | 内容 | 说明 |
 |---|---|---|
 | **P0** | §1 精神内核 + §6 概率池纯净性 + §5 能力探测接口 | **架构地基，先于一切代码** |
 | **P1** | L9 Crosshair（Niri 实机验证）+ teardown 生命周期 | 旗舰校准器 |
 | **P2** | L0 Anchor（通用兜底）+ C 层 L1/L8/L7 增量追踪 | 覆盖无 layer-shell 环境。✅ 已完成（P2-a…P2-g） |
-| **P3** | ~~L10 GradientField~~ **已否决**（§4.2）；目标待定，见 [提案目录](proposals/) | 提案阶段实测推翻原设计 |
+| **P3** | ~~L10 GradientField~~ **已否决**（§4.2） | 提案阶段实测推翻原设计 |
+| **P4** | `fidus-test` 跨环境测试子项目方案（§8） | 先实现 `ci`，再 `live-host`，最后显式实验 `live-container`；脚本、专用 crate、容器按职责共存 |
 
 > **重要顺序**：先确立"零信任 + 概率池纯净"的架构约束，再写校准器代码。这与 v0.4 把 C shim 当 P3 的顺序**完全相反**。
 
 ---
 
-## 9. 已删除 / 已降级项（相对 v0.4）
+## 10. 已删除 / 已降级项（相对 v0.4）
 
 | 项 | 处理 | 理由 |
 |---|---|---|
@@ -554,7 +647,7 @@ fidus-extras     🚧 // 业务特定项：L3 Beacon / L5 TUIScan——移出核
 
 ---
 
-## 10. 待实机验证（开放问题）
+## 11. 待实机验证（开放问题）
 
 以下问题**显式标注为未验证**，避免 v0.4 式的过度承诺：
 
@@ -569,7 +662,7 @@ fidus-extras     🚧 // 业务特定项：L3 Beacon / L5 TUIScan——移出核
 
 ---
 
-## 11. 反直觉陷阱备忘（写代码前必读）
+## 12. 反直觉陷阱备忘（写代码前必读）
 
 > 本节全部来自**实际踩坑或审查发现**，每条都附可复现的实测数字。
 > 与 §4/§6 不同，这里记的不是"该怎么做"，而是**"看起来该这么做，但错了"**。

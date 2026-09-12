@@ -1,0 +1,7 @@
+target/
+.git/
+.soak*/
+.probe/
+.p4-check/
+*.log
+fidus_dump.txt

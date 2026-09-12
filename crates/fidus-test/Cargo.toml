@@ -1,0 +1,20 @@
+[package]
+name = "fidus-test"
+description = "fidus cross-environment test protocol and harness tools"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+default = []
+wayland = ["dep:fidus", "fidus/wayland-layer"]
+x11 = ["dep:fidus", "fidus/x11"]
+all-backends = ["wayland", "x11"]
+
+[dependencies]
+fidus = { workspace = true, optional = true }
+
+[[bin]]
+name = "fidus-test"
+path = "src/main.rs"

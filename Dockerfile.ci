@@ -1,0 +1,43 @@
+# syntax=docker/dockerfile:1
+# Debian-based CI image. The digest is intentionally mandatory: a floating
+# Debian tag cannot establish reproducibility. The default registry is
+# DaoCloud's Docker Hub mirror, not Tsinghua.
+ARG DEBIAN_IMAGE=docker.m.daocloud.io/library/debian:12-slim
+ARG DEBIAN_IMAGE_DIGEST=sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
+FROM ${DEBIAN_IMAGE}@${DEBIAN_IMAGE_DIGEST}
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    TZ=UTC \
+    RUSTUP_HOME=/opt/rustup \
+    RUSTUP_DIST_SERVER=https://rsproxy.cn \
+    RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup \
+    CARGO_HOME=/opt/cargo \
+    CARGO_NET_RETRY=5 \
+    PATH=/opt/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+RUN apt-get -o Acquire::Retries=5 update \
+    && apt-get install --yes --no-install-recommends \
+       bash ca-certificates curl gcc libc6-dev pkg-config libwayland-dev libx11-dev \
+       libx11-xcb-dev libxcb1-dev libxcb-shm0-dev libxcb-randr0-dev \
+       libxcb-xfixes0-dev libxcb-shape0-dev libxcb-render0-dev libxcb-sync-dev \
+       libxcb-present-dev libxkbcommon-dev tzdata \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl --http1.1 --retry 5 --retry-all-errors --proto '=https' --tlsv1.2 --fail --location https://rsproxy.cn/rustup-init.sh \
+       | sh -s -- -y --profile minimal --default-toolchain 1.86.0 \
+    && for attempt in 1 2 3 4 5; do rustup component add clippy rustfmt && break; test "$attempt" = 5 && exit 1; sleep 2; done
+
+WORKDIR /workspace
+COPY . .
+
+# Resolve and compile every dependency while the build network is available;
+# the runtime container remains network-isolated and uses the cached graph.
+RUN cargo test --locked --workspace \
+    && cargo clippy --locked --workspace --all-targets -- -D warnings \
+    && cargo doc --locked --workspace --no-deps
+ENV CARGO_NET_OFFLINE=true \
+    CARGO_TARGET_DIR=/tmp/fidus-target
+
+# The entrypoint performs deterministic checks and never acquires a display.
+CMD ["bash", "scripts/ci_fidus_test.sh"]

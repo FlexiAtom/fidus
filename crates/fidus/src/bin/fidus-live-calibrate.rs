@@ -19,7 +19,71 @@
 
 use fidus::prelude::*;
 
+fn protocol_context() -> (String, String) {
+    let mode = match std::env::var("FIDUS_EXECUTION_MODE").as_deref() {
+        Ok("ci") => "ci",
+        Ok("live-container") => "live-container",
+        _ => "live-host",
+    };
+    let requested_id =
+        std::env::var("FIDUS_RUN_ID").unwrap_or_else(|_| format!("pid{}", std::process::id()));
+    let run_id = if !requested_id.is_empty()
+        && requested_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+    {
+        requested_id
+    } else {
+        format!("pid{}", std::process::id())
+    };
+    (mode.to_owned(), run_id)
+}
+
+fn emit_result(line: String) {
+    println!("{line}");
+}
+
+fn emit_summary(run_id: &str, mode: &str, status: &str, total: usize, ok: usize) {
+    emit_result(format!(
+        "FIDUS_RESULT version=1 kind=summary run_id={run_id} status={status} execution_mode={mode} records_total={total} records_ok={ok} records_failed={}",
+        total - ok
+    ));
+}
+
+fn choice_name(choice: BackendChoice) -> &'static str {
+    match choice {
+        BackendChoice::Auto => "auto",
+        BackendChoice::WaylandLayer => "wayland",
+        BackendChoice::X11 => "x11",
+    }
+}
+
+fn method_token(method: CalibrationMethod) -> &'static str {
+    match method {
+        CalibrationMethod::Crosshair => "crosshair",
+        CalibrationMethod::GradientField => "gradient-field",
+        CalibrationMethod::Anchor => "anchor",
+    }
+}
+
+fn compositor_token(kind: &fidus_core::env::CompositorKind) -> &'static str {
+    match kind {
+        fidus_core::env::CompositorKind::Niri => "niri",
+        fidus_core::env::CompositorKind::Sway => "sway",
+        fidus_core::env::CompositorKind::Hyprland => "hyprland",
+        fidus_core::env::CompositorKind::KWin => "kwin",
+        fidus_core::env::CompositorKind::Mutter => "mutter",
+        fidus_core::env::CompositorKind::Weston => "weston",
+        fidus_core::env::CompositorKind::Labwc => "labwc",
+        fidus_core::env::CompositorKind::Wayfire => "wayfire",
+        fidus_core::env::CompositorKind::X11 => "x11",
+        fidus_core::env::CompositorKind::Other(_) => "other",
+        fidus_core::env::CompositorKind::Unknown => "unknown",
+    }
+}
+
 fn main() {
+    let (mode, run_id) = protocol_context();
     let choice = match std::env::var("FIDUS_BACKEND").as_deref() {
         Ok("wayland") | Ok("wayland-layer") => BackendChoice::WaylandLayer,
         Ok("x11") => BackendChoice::X11,
@@ -37,10 +101,23 @@ fn main() {
         Ok(e) => e,
         Err(e) => {
             eprintln!("[stage 1] backend init failed ({choice:?}): {e}");
+            emit_result(format!(
+                "FIDUS_RESULT version=1 kind=environment run_id={run_id} status=unavailable execution_mode={mode} backend=unknown compositor=unknown output=unknown scale=not-measured transform=not-measured"
+            ));
+            emit_result(format!(
+                "FIDUS_RESULT version=1 kind=lifecycle run_id={run_id} status=failed execution_mode={mode} teardown=not_started recovery=not_requested"
+            ));
+            emit_summary(&run_id, &mode, "failed", 2, 0);
             std::process::exit(2);
         }
     };
-    println!("[stage 1] environment: {:?}", engine.environment());
+    let environment = engine.environment();
+    println!("[stage 1] environment: {environment:?}");
+    emit_result(format!(
+        "FIDUS_RESULT version=1 kind=environment run_id={run_id} status=ready execution_mode={mode} backend={} compositor={} output=not-measured scale=not-measured transform=not-measured",
+        choice_name(choice),
+        compositor_token(&environment.compositor_type)
+    ));
 
     // Stage 2: gate answers, all methods.
     let mut any = false;
@@ -51,6 +128,14 @@ fn main() {
     }
     if !any {
         eprintln!("[stage 2] no calibration method is usable here");
+        emit_result(format!(
+            "FIDUS_RESULT version=1 kind=calibration run_id={run_id} status=failed execution_mode={mode} backend={} method=none",
+            choice_name(choice)
+        ));
+        emit_result(format!(
+            "FIDUS_RESULT version=1 kind=lifecycle run_id={run_id} status=failed execution_mode={mode} teardown=not_started recovery=not_requested"
+        ));
+        emit_summary(&run_id, &mode, "failed", 3, 1);
         std::process::exit(3);
     }
 
@@ -69,18 +154,42 @@ fn main() {
                 m.linear_scale()
             );
             let [a, b, c, d, e, f] = m.coefficients();
-            println!(
-                "[stage 3] map: [{a:.4} {b:.4} {c:.2}; {d:.4} {e:.4} {f:.2}]"
-            );
+            println!("[stage 3] map: [{a:.4} {b:.4} {c:.2}; {d:.4} {e:.4} {f:.2}]");
             println!(
                 "[stage 3] quality: rms {:.3}px, max {:.3}px, verify {:.3}px, consistency {:.3}px, samples {}, passes {}",
-                q.rms_residual_px, q.max_residual_px, q.verification_max_err_px,
-                q.consistency_max_err_px, q.sample_count, q.independent_passes
+                q.rms_residual_px,
+                q.max_residual_px,
+                q.verification_max_err_px,
+                q.consistency_max_err_px,
+                q.sample_count,
+                q.independent_passes
             );
+            emit_result(format!(
+                "FIDUS_RESULT version=1 kind=calibration run_id={run_id} status=ok execution_mode={mode} backend={} method={} rms_residual_px={:.6} verification_max_err_px={:.6} consistency_max_err_px={:.6}",
+                choice_name(choice),
+                method_token(frame.method()),
+                q.rms_residual_px,
+                q.verification_max_err_px,
+                q.consistency_max_err_px
+            ));
+            emit_result(format!(
+                "FIDUS_RESULT version=1 kind=lifecycle run_id={run_id} status=ok execution_mode={mode} teardown=confirmed recovery=not_requested"
+            ));
+            emit_summary(&run_id, &mode, "ok", 3, 3);
         }
         Err(e) => {
             eprintln!("[stage 3] calibration failed: {e}");
-            eprintln!("[stage 4] verify teardown externally (see below)");
+            eprintln!(
+                "[stage 4] teardown is enforced internally; external compositor queries are diagnostics only"
+            );
+            emit_result(format!(
+                "FIDUS_RESULT version=1 kind=calibration run_id={run_id} status=failed execution_mode={mode} backend={} method=selected",
+                choice_name(choice)
+            ));
+            emit_result(format!(
+                "FIDUS_RESULT version=1 kind=lifecycle run_id={run_id} status=failed execution_mode={mode} teardown=unknown recovery=not_requested"
+            ));
+            emit_summary(&run_id, &mode, "failed", 3, 1);
             std::process::exit(1);
         }
     }

@@ -7,12 +7,13 @@ members = [
     "crates/fidus-calibrate",
     "crates/fidus-estimate",
     "crates/fidus",
+    "crates/fidus-test",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.86"
 license = "Apache-2.0"
 
 [workspace.dependencies]
@@ -21,6 +22,7 @@ fidus-backend-wayland-layer = { path = "crates/fidus-backend-wayland-layer" }
 fidus-backend-x11 = { path = "crates/fidus-backend-x11" }
 fidus-calibrate = { path = "crates/fidus-calibrate" }
 fidus-estimate = { path = "crates/fidus-estimate" }
+fidus = { path = "crates/fidus", default-features = false }
 thiserror = "2"
 
 [profile.release]
