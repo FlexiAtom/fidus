@@ -65,6 +65,18 @@ fn render(
     patches: &[Rect],
     holes: &[Rect],
 ) -> Frame {
+    render_tinted(screen, marker, patches, holes, None)
+}
+
+/// `patch_rgba` forces every patch to one colour, which is how
+/// `Noise::ForeignRedrawSameColor` defeats the colour gate on purpose.
+fn render_tinted(
+    screen: &Screen,
+    marker: Option<(LogicalPoint, MarkerStyle)>,
+    patches: &[Rect],
+    holes: &[Rect],
+    patch_rgba: Option<[u8; 4]>,
+) -> Frame {
     let (w, h) = (screen.phys_w, screen.phys_h);
     let stride = screen.stride() as usize;
     let mut data = vec![0u8; stride * h as usize];
@@ -94,7 +106,12 @@ fn render(
         }
     }
     for &(px, py, pw, ph) in patches {
-        let c = [(px % 256) as u8, (py % 256) as u8, ((px ^ py) % 256) as u8, 255];
+        let c = patch_rgba.unwrap_or([
+            (px % 256) as u8,
+            (py % 256) as u8,
+            ((px ^ py) % 256) as u8,
+            255,
+        ]);
         for y in py..py + ph {
             for x in px..px + pw {
                 put(&mut data, x, y, c);
@@ -147,6 +164,31 @@ enum Noise {
     Clean,
     /// Two small wallpaper patches whose positions drift every few captures.
     Wallpaper { seed: u64 },
+    /// Another application repainting itself, which is the normal state of a
+    /// desktop somebody is actually using (AGENTS §11).
+    ///
+    /// Measured on live Niri with nothing projected: 29 consecutive capture
+    /// pairs contained 28 identical ones and a single pair differing by
+    /// 144386 pixels, its bounding box starting at a terminal window's
+    /// corner. A calibration takes ~28 frames, so the chance of at least one
+    /// collision is 1-(1-1/29)^28 = 63%, which matched the observed failure
+    /// rate of 4/12 to 7/15.
+    ///
+    /// `period` controls how often the foreign window repaints: every
+    /// `period`-th capture renders it in a different colour, so a
+    /// baseline/post pair that straddles the change sees a large region
+    /// appear out of nowhere. Unlike `Wallpaper`, the patch is *large*, so it
+    /// survives the area gate and fragments into many plausible components.
+    ForeignRedraw { period: u64 },
+    /// The adversarial case for the colour gate: a foreign window repainting
+    /// in *the marker's own colour*.
+    ///
+    /// Why this exists: mutation-testing `ForeignRedraw` showed the colour
+    /// gate alone carried it, so `corroborations` was an untested knob
+    /// (AGENTS §7). Colour cannot separate these blocks from the marker;
+    /// only looking twice can, because the marker stays put and the repaint
+    /// moves.
+    ForeignRedrawSameColor { period: u64 },
 }
 
 struct FakeIo {
@@ -178,6 +220,54 @@ impl FakeIo {
     fn patches_for_step(&self) -> Vec<Rect> {
         match self.noise {
             Noise::Clean => Vec::new(),
+            Noise::ForeignRedrawSameColor { period } => {
+                let phase = self.step / period;
+                if phase % 2 == 0 {
+                    return Vec::new();
+                }
+                let mut rng = Rng::seed_from(0x5A5A_1234 ^ phase);
+                let marker_px = (self.style.size_logical * self.screen.scale) as i64;
+                (0..8)
+                    .map(|_| {
+                        let x = rng.range(40.0, (self.screen.phys_w - 120) as f64) as i64;
+                        let y = rng.range(
+                            self.screen.panel_h + 40.0,
+                            (self.screen.phys_h - 120) as f64,
+                        ) as i64;
+                        (x, y, marker_px, marker_px)
+                    })
+                    .collect()
+            }
+            Noise::ForeignRedraw { period } => {
+                // A window repainting its *contents* — think a terminal
+                // redrawing text. What matters for the detector is not the
+                // total changed area but its shape: the live failures
+                // reported "68 plausible regions", meaning the change broke
+                // into many solid, marker-sized blocks that each cleared the
+                // fill-ratio and area gates.
+                //
+                // An earlier version of this model displaced one large
+                // rectangle instead. That produces a 6 px-wide L-shaped rim
+                // whose fill ratio is 4.9% against a 0.45 gate, so the
+                // detector discarded it and the test passed while the real
+                // bug went unreproduced.
+                let phase = self.step / period;
+                if phase % 2 == 0 {
+                    return Vec::new();
+                }
+                let mut rng = Rng::seed_from(0xF0E1_D2C3 ^ phase);
+                let marker_px = (self.style.size_logical * self.screen.scale) as i64;
+                (0..24)
+                    .map(|_| {
+                        let x = rng.range(40.0, (self.screen.phys_w - 120) as f64) as i64;
+                        let y = rng.range(
+                            self.screen.panel_h + 40.0,
+                            (self.screen.phys_h - 120) as f64,
+                        ) as i64;
+                        (x, y, marker_px, marker_px)
+                    })
+                    .collect()
+            }
             Noise::Wallpaper { seed } => {
                 // Positions change only every 3rd capture: consecutive
                 // baseline/post pairs usually share patches, and when they
@@ -204,7 +294,13 @@ impl fidus_core::io::CaptureIo for FakeIo {
     fn capture(&mut self) -> Result<Frame, CaptureError> {
         self.step += 1;
         let marker = if self.blind { None } else { self.marker.map(|p| (p, self.style)) };
-        Ok(render(&self.screen, marker, &self.patches_for_step(), &[]))
+        // The same-colour adversary paints in whatever colour the calibrator
+        // last asked for, so the colour gate cannot separate it from a marker.
+        let tint = match self.noise {
+            Noise::ForeignRedrawSameColor { .. } => Some(self.style.rgba),
+            _ => None,
+        };
+        Ok(render_tinted(&self.screen, marker, &self.patches_for_step(), &[], tint))
     }
 }
 
@@ -491,4 +587,82 @@ fn integer_scales_are_exact_and_fractional_ones_stay_bounded() {
             q.consistency_max_err_px,
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Foreign window repaints (measured on live Niri, 2026-09).
+// ---------------------------------------------------------------------------
+
+/// L9 must survive another application repainting itself mid-calibration.
+///
+/// **Why this test exists**: the difference detector's contract is "the
+/// marker is the only thing that changed between these two frames". That
+/// premise was never written down and is false on any desktop somebody is
+/// using — measured live, 1 in 29 consecutive capture pairs differed by
+/// 144386 pixels because a terminal repainted. Spread over the ~28 frames a
+/// calibration needs, that is a 63% chance of at least one collision, and
+/// the observed failure rate was 4/12 to 7/15 (AGENTS §11).
+///
+/// **What it guards**: that a large foreign repaint cannot be mistaken for
+/// the marker. The failures were not subtle — the detector reported "68
+/// plausible regions found" as the background fragmented, and one run
+/// produced a 287 px residual, meaning a background fragment was accepted as
+/// a correspondence point and fed to the least-squares solve.
+///
+/// **Failure mode if this regresses**: calibration either fails outright
+/// (honest, but unusable) or, worse, solves against a fragment. The residual
+/// gate catches the latter today, which is exactly why it must stay.
+#[test]
+fn foreign_window_repaints_do_not_break_calibration() {
+    // period 4: the foreign window's colour flips often enough that several
+    // baseline/post pairs straddle a repaint, but not so often that every
+    // single pair does — mirroring a real desktop.
+    let mut io = FakeIo::new(
+        Screen { phys_w: 1366, phys_h: 768, panel_h: 0.0, scale: 1.0 },
+        Noise::ForeignRedraw { period: 4 },
+    );
+
+    let frame = calibrator(11)
+        .calibrate(&mut io)
+        .expect("calibration must survive a foreign window repainting");
+
+    let [a, b, c, d, e, f] = frame.map().coefficients();
+    assert!((a - 1.0).abs() < 0.01, "a = {a}");
+    assert!((e - 1.0).abs() < 0.01, "e = {e}");
+    assert!(b.abs() < 0.01 && d.abs() < 0.01, "no skew expected: b={b} d={d}");
+    assert!(c.abs() < 0.5 && f.abs() < 0.5, "no offset expected: c={c} f={f}");
+
+    let q = frame.quality();
+    // Exact up to float noise: the least-squares solve accumulates ~1e-13
+    // even when every correspondence is pixel-perfect.
+    assert!(q.rms_residual_px < 1e-9, "scale 1 must stay exact: {q:?}");
+    assert!(io.destroyed, "projector torn down");
+}
+
+
+/// The colour gate alone is not enough: corroboration must carry the case
+/// where the interference is the marker's own colour.
+///
+/// **Why this test exists**: mutation-testing
+/// `foreign_window_repaints_do_not_break_calibration` showed it still passed
+/// with `corroborations` turned down to 1, which made that knob untested
+/// (AGENTS §7) — the colour gate was doing all the work. This test removes
+/// colour as a discriminator so only "look again, the marker has not moved"
+/// can succeed.
+#[test]
+fn same_colored_repaints_need_corroboration() {
+    let mut io = FakeIo::new(
+        Screen { phys_w: 1366, phys_h: 768, panel_h: 0.0, scale: 1.0 },
+        Noise::ForeignRedrawSameColor { period: 4 },
+    );
+
+    let frame = calibrator(23)
+        .calibrate(&mut io)
+        .expect("corroboration must survive same-coloured interference");
+
+    let q = frame.quality();
+    assert!(q.rms_residual_px < 1e-9, "scale 1 must stay exact: {q:?}");
+    let [a, _, c, _, e, f] = frame.map().coefficients();
+    assert!((a - 1.0).abs() < 0.01 && (e - 1.0).abs() < 0.01, "a={a} e={e}");
+    assert!(c.abs() < 0.5 && f.abs() < 0.5, "c={c} f={f}");
 }

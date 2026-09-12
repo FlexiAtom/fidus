@@ -1,2 +1,5 @@
 target/
 fidus_dump.txt
+
+# 实机测试产物
+.soak*/
