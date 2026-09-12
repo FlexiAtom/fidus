@@ -13,6 +13,10 @@ wayland-layer = ["dep:fidus-backend-wayland-layer"]
 # Adapts override-redirect window projection + GetImage(root) capture.
 x11 = ["dep:fidus-backend-x11"]
 
+[[bin]]
+name = "fidus-probe-marker"
+required-features = ["wayland-layer"]
+
 [dependencies]
 fidus-core = { workspace = true }
 fidus-calibrate = { workspace = true }
