@@ -267,6 +267,10 @@ cargo clippy   # 零警告
 - **GNOME（无 layer-shell）**：需要 `fidus-backend-wayland-portal`，未实现。
 - **Y_INVERT**：screencopy 的 Y 反转已处理并有单测，但仅在实机（Niri 不置位该标志）验证过非反转路径。
 
+## 特别鸣谢
+
+特别感谢赞助者 [yspbwx2010](https://github.com/yspbwx2010) 对 fidus 项目的支持。
+
 ## 许可
 
 Apache-2.0
