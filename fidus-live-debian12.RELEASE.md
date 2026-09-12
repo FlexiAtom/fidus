@@ -1,4 +1,4 @@
-# fidus Debian 12 live-container image
+# fidus 0.1.0-beta.1 Debian 12 live-container image
 
 This release artifact is a Debian 12 slim runtime image containing the
 release-built `fidus-test` and `fidus-live-calibrate` binaries plus the
@@ -8,6 +8,8 @@ The image was built from:
 
 - base: `docker.m.daocloud.io/library/debian:12-slim`
 - base digest: `sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171`
+- Debian apt mirror: `https://mirrors.ustc.edu.cn/debian/` (not Tsinghua)
+- Rust toolchain: `1.86.0`, downloaded through `https://rsproxy.cn`
 - image ID: see `fidus-live-debian12.image-id`
 - archive SHA-256: see `fidus-live-debian12.tar.zst.sha256`
 

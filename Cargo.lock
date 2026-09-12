@@ -36,7 +36,7 @@ dependencies = [
 
 [[package]]
 name = "fidus"
-version = "0.1.0"
+version = "0.1.0-beta.1"
 dependencies = [
  "fidus-backend-wayland-layer",
  "fidus-backend-x11",
@@ -47,7 +47,7 @@ dependencies = [
 
 [[package]]
 name = "fidus-backend-wayland-layer"
-version = "0.1.0"
+version = "0.1.0-beta.1"
 dependencies = [
  "fidus-core",
  "libc",
@@ -59,7 +59,7 @@ dependencies = [
 
 [[package]]
 name = "fidus-backend-x11"
-version = "0.1.0"
+version = "0.1.0-beta.1"
 dependencies = [
  "fidus-core",
  "thiserror",
@@ -68,7 +68,7 @@ dependencies = [
 
 [[package]]
 name = "fidus-calibrate"
-version = "0.1.0"
+version = "0.1.0-beta.1"
 dependencies = [
  "fidus-core",
  "thiserror",
@@ -76,21 +76,21 @@ dependencies = [
 
 [[package]]
 name = "fidus-core"
-version = "0.1.0"
+version = "0.1.0-beta.1"
 dependencies = [
  "thiserror",
 ]
 
 [[package]]
 name = "fidus-estimate"
-version = "0.1.0"
+version = "0.1.0-beta.1"
 dependencies = [
  "fidus-core",
 ]
 
 [[package]]
 name = "fidus-test"
-version = "0.1.0"
+version = "0.1.0-beta.1"
 dependencies = [
  "fidus",
 ]

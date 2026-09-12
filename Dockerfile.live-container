@@ -15,7 +15,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
     CARGO_NET_RETRY=5 \
     PATH=/opt/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-RUN apt-get -o Acquire::Retries=5 update \
+RUN sed -i \
+       -e 's|deb.debian.org/debian-security|mirrors.ustc.edu.cn/debian-security|g' \
+       -e 's|deb.debian.org/debian|mirrors.ustc.edu.cn/debian|g' \
+       /etc/apt/sources.list.d/debian.sources \
+    && apt-get -o Acquire::Retries=5 update \
     && apt-get install --yes --no-install-recommends \
        bash ca-certificates curl gcc libc6-dev pkg-config libwayland-dev libx11-dev \
        libx11-xcb-dev libxcb1-dev libxcb-shm0-dev libxcb-randr0-dev \
@@ -33,7 +37,11 @@ RUN cargo build --locked --release -p fidus --bin fidus-live-calibrate \
 
 FROM ${DEBIAN_IMAGE}@${DEBIAN_IMAGE_DIGEST}
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC
-RUN apt-get -o Acquire::Retries=5 update \
+RUN sed -i \
+       -e 's|deb.debian.org/debian-security|mirrors.ustc.edu.cn/debian-security|g' \
+       -e 's|deb.debian.org/debian|mirrors.ustc.edu.cn/debian|g' \
+       /etc/apt/sources.list.d/debian.sources \
+    && apt-get -o Acquire::Retries=5 update \
     && apt-get install --yes --no-install-recommends \
        ca-certificates libgcc-s1 libc6 libwayland-client0 libx11-6 libxkbcommon0 \
     && rm -rf /var/lib/apt/lists/*
