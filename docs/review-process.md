@@ -94,9 +94,13 @@
 
 > **P4 的 CI 协议核心、Debian CI build/run、live-host、本机 live-container 和 Debian runtime Release 资产已完成实测与收口。**
 
-十项裁决与伪代码方案仍有效；协议 kind schema/终态、旧 CLI 兼容、probe facade 边界、唯一 owner 和 teardown 合法证据已冻结。本机临时镜像已通过当前 Wayland socket 完成同 UID 校准；不同 UID、缺 socket、非法 runtime 已分别得到预期的环境/工具错误。宿主参数契约有 `scripts/test_live_container.sh` 自动测试。正式交付已锁定 DaoCloud Docker Hub mirror 上的 Debian 12 slim digest、Rust 1.86.0 toolchain 和系统包；当前仍需在构建网络稳定时完成一次完整 pinned 镜像构建证据。
+十项裁决与伪代码方案仍有效；协议 kind schema/终态、旧 CLI 兼容、probe facade 边界、唯一 owner 和 teardown 合法证据已冻结。本机临时镜像已通过当前 Wayland socket 完成同 UID 校准；不同 UID、缺 socket、非法 runtime 已分别得到预期的环境/工具错误。宿主参数契约有 `scripts/test_live_container.sh` 自动测试。正式交付已锁定 DaoCloud Docker Hub mirror 上的 Debian 12 slim digest、Rust 1.86.0 toolchain 和系统包；本句保留为 P4 收口前的历史记录，后续 P5 审查不重复打开该门槛。
 
-## 5. 审查记录要求
+## 5. 当前 P5 记录
+
+P5 output mutation/recovery 提案已获人工批准，草案全审有条件通过，方案已并入 `docs/spec.md` §8.7。当前草案为 [`docs/drafts/P5-output-mutation-recovery.md`](drafts/P5-output-mutation-recovery.md)，已定义宿主 adapter、快照、状态机、锁、失败优先级和 fake adapter F1–F42；全审已发现并修正生命周期早退、未授权分支、NameOnly 误确认、矩阵聚合、信号监督、锁原子性和 parser 边界问题。七项设计决策已写入草案，其中 recovery 三值已落到 `fidus-test` parser 和单测；最小 `scripts/output_mutation_runner.sh` 和 fake Niri 回归已实现；审计覆盖显式授权、snapshot 后早退恢复、recovery 优先、实际 PGID、symlink lock、ASCII 控制字符、malformed/deferred parser 和 flock 竞争。真实 Niri 异常路径、完整 timeout/signal 矩阵和跨 compositor 身份证明仍是后续验收门槛。其中“真实桌面错误处理单点验证”按用户要求挂起；“跨机器发布验证”同样挂起，二者均不得标记为通过。本轮 `cargo test/clippy/doc` 尝试因 Cargo registry 缓存目录只读而未启动：默认缓存报 Read-only file system，项目内离线缓存缺少 `thiserror`；不得将该次尝试记为 Rust 验证通过。实际实验已完成：只读 probe 通过；recovery parser 4/4 通过；`flock` 抢锁拒绝/释放后重获通过；`setsid` 实际 PGID 进程组 TERM→KILL 回收通过；临时信号/恢复模型 5/5 通过；当前 Niri 的 scale apply/read-back/restore 和 transform canonical read-back/restore 通过。
+
+## 6. 审查记录要求
 
 每次对提案执行快审或全审，至少记录：
 

@@ -618,9 +618,72 @@ P4 已完成的门槛包括 feature 构建、协议单测、双入口兼容、De
 
 所有未通过的环境仍应报告 `EnvironmentUnavailable`，不能伪装成通过。
 
+### 8.7 P5 output mutation/recovery 方案
+
+P5 方案已根据提案、草案全审和实际实验冻结设计边界；**本节是方案，不代表真实 mutation runner 已实现**。详细接口、伪代码和测试矩阵见 [`docs/drafts/P5-output-mutation-recovery.md`](drafts/P5-output-mutation-recovery.md)，实测证据见 [`docs/measurements/p5-output-mutation-recovery.md`](measurements/p5-output-mutation-recovery.md)。
+
+#### 8.7.1 权限与职责
+
+- 只有 `live-host` 宿主 runner 可以执行 output mutation、保存快照、恢复和 read-back；
+- 必须由调用方显式传入 `--allow-output-mutation`；默认不得修改用户当前 compositor 配置；
+- `live-container` 永远拒绝 mutation；容器内 binary 不调用 compositor 控制命令，也不拥有第二个恢复器；
+- mutation 只属于测试控制，不属于 fidus 坐标真值，不能进入概率池或 `CoordinateFrame`；
+- output 名称只能是命令 selector，不能单独证明稳定硬件身份。
+
+#### 8.7.2 快照、应用与恢复
+
+宿主 runner 必须在 mutation lock 内保存不可变原始快照：
+
+```text
+output selector
+identity evidence
+original scale
+original transform
+wall-clock time
+monotonic time
+```
+
+状态顺序固定为：
+
+```text
+LockAcquired → ReadOriginal → AppliedAndReadBack → Running
+→ RestoreRequested → RestoredAndReadBack → Finished
+```
+
+apply 和 restore 都不能只信命令退出码，必须读回并逐字段比较。恢复每个字段都必须 best-effort 尝试；一个字段失败不能跳过其它字段。恢复前还必须检查本 run 最后一次 applied 状态，发现用户或其它工具外部修改时默认拒绝覆盖。
+
+当前 Niri 实测发现：未连接 output 的控制命令可能返回 `rc=0` 并表示“连接后生效”，所以 `rc=0` 不是 apply 证据；transform `90` 的读回是 `90° counter-clockwise`，比较前必须 canonicalize。
+
+#### 8.7.3 恢复、信号与锁失败
+
+恢复结果优先级高于 child/calibration 结果。恢复失败、身份无法证明、锁释放无法证明、compositor 重启、宿主崩溃或 SIGKILL 后，均不得报告恢复成功；协议 recovery 值冻结为：
+
+```text
+not_requested | confirmed | unverified
+```
+
+其中当前 Niri 的 NameOnly 身份只能产生 `unverified`，不能产生 `confirmed`。宿主 supervisor 必须使用实际 PGID，对 child 进程组执行 `TERM → bounded wait → KILL → wait/reap`；恢复阶段重复信号只记录，不重入恢复。锁必须使用 canonical session lock 的内核持有语义，PID 元数据只是诊断，stale lock 不自动删除。
+
+P5 当前保守退出码真值表如下；恢复未被稳定身份或 read-back 证明时，优先级最高并统一返回 `4`：
+
+| 条件 | lifecycle recovery | runner exit |
+|---|---|---:|
+| 未授权、参数、symlink lock 或锁竞争错误（尚未取得 snapshot） | `not_requested` | `3` |
+| 环境不可用或 snapshot 读取失败（尚未取得 snapshot） | `not_requested` | `2` |
+| snapshot 后任意 apply/child/信号路径，且恢复无法证明 | `unverified` | `4` |
+| 当前 Niri 字段已恢复但只有 NameOnly identity | `unverified` | `4` |
+| child 返回非零但恢复仍只能是 NameOnly | `unverified` | `4` |
+| 未来具备稳定 identity 且所有字段 read-back 成功 | `confirmed` | child 原始结果（0 或业务失败） |
+
+真实桌面错误处理的单点验证目前挂起，不能用本机 fake 回归替代；跨机器发布验证也单独挂起。
+
+#### 8.7.4 实现状态
+
+已完成：提案批准、草案全审、协议 recovery parser 约束、Niri 只读/正常路径实验、fake 模型实验、锁竞争和进程组实验、`fidus-test` 纯测试 fixture，以及仅供显式手工调用的最小 `scripts/output_mutation_runner.sh`（fake Niri 回归通过）。方案 A 审计还修复了 snapshot 后早退恢复、recovery 优先、实际 PGID 信号转发、symlink lock、ASCII 控制字符、malformed/deferred parser 和并发 flock 边界。尚未完成：真实 Niri 异常路径与跨 compositor 身份证明；该脚本仍不是默认测试入口，当前 NameOnly 即使字段恢复也只能返回 `recovery=unverified`/退出码 4，不能报告 confirmed。因此不得把 P5 方案写成完整 P5 已实现。
+
 ---
 
-## 9. 实施优先级（P0 → P4）
+## 9. 实施优先级（P0 → P5）
 
 | 阶段 | 内容 | 说明 |
 |---|---|---|
@@ -629,6 +692,7 @@ P4 已完成的门槛包括 feature 构建、协议单测、双入口兼容、De
 | **P2** | L0 Anchor（通用兜底）+ C 层 L1/L8/L7 增量追踪 | 覆盖无 layer-shell 环境。✅ 已完成（P2-a…P2-g） |
 | **P3** | ~~L10 GradientField~~ **已否决**（§4.2） | 提案阶段实测推翻原设计 |
 | **P4** | `fidus-test` 跨环境测试子项目方案（§8） | 先实现 `ci`，再 `live-host`，最后显式实验 `live-container`；脚本、专用 crate、容器按职责共存 |
+| **P5** | 宿主 output mutation/recovery 方案（§8.7） | 方案已冻结；真实 host adapter、supervisor 和异常恢复仍未实现，不得默认修改用户桌面 |
 
 > **重要顺序**：先确立"零信任 + 概率池纯净"的架构约束，再写校准器代码。这与 v0.4 把 C shim 当 P3 的顺序**完全相反**。
 
@@ -657,8 +721,9 @@ P4 已完成的门槛包括 feature 构建、协议单测、双入口兼容、De
 3b. ~~**分数缩放下的稳健性**~~ — **已解决，且成因与缩放无关**：真正的成因是真实桌面上别的窗口自发重绘，破坏了差分检测"标记是唯一变化"的隐含前提。已由 §4.1「检测的三重判据」修复，实机 A/B：修复前 12/12 失败，修复后 0/30。分数缩放本身只带来 0.2–0.3px 的无害残差。
 4. 多显示器/混合 DPI 下 `CoordinateFrame` 的表示与热插拔处理？ — **部分有策略**：Gate 在 `multi_monitor_count > 1` 时返回 `Degraded`（置信度 0.75/0.65），属"诚实降级"而非解决；表示与热插拔仍未定
 5. 权限状态机在各平台的精确行为（尤其 macOS 重启需求）？ — **状态机已落地**（`PermissionState` 五态已参与 Gate 判决，含 `RequiresRestart`），但 **macOS 实机行为仍未验证**
+6. P5 真实 host adapter、Niri parser adapter、signal supervisor 和异常恢复？ — **未实现**；当前只有 test-only fixture、fake 模型和本机正常路径实验，NameOnly 身份不得报告 `recovery=confirmed`
 
-> 第 2、3 条是真空白；3b 已定位成因待修；第 4、5 条已有诚实的降级/占位，但都**不等于已解决**。
+> 第 2、3 条是真空白；3b 已定位成因待修；第 4、5、6 条已有诚实的降级/占位，但都**不等于已解决**。
 
 ---
 

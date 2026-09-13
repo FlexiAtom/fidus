@@ -28,6 +28,7 @@
 |---|---|---|
 | [P3 · L10 GradientField](P3-L10-gradient-field.md) | ✅ **已裁决：三个方向全部否决** | 两轮实测：①「对数螺旋 + 锁主频」自相矛盾；②实机发现 L9 的真实短板在**投射端取整**（分数缩放 rms 0.308px），精修类方案不对症。规格 §4.2 已重写。 |
 | [P4 · 独立测试子项目](P4-fidus-test-subproject.md) | ✅ **已转方案** | `fidus-test` 与宿主脚本、容器共存；容器分为 `ci` / `live-host` / `live-container`；伪代码与替代路径全审见 [`docs/drafts/P4-fidus-test.md`](../drafts/P4-fidus-test.md)，规范见 spec §8。 |
+| [P5 · output mutation/recovery](P5-output-mutation-recovery.md) | ✅ **已转方案，最小 runner 已实现** | `scripts/output_mutation_runner.sh` 仅供显式 `--allow-output-mutation` 手工调用；fake Niri 回归见 `scripts/test_output_mutation_runner.sh`；真实 Niri 异常路径和跨 compositor 身份证明仍未完成。 |
 
 ## 实测记录
 
