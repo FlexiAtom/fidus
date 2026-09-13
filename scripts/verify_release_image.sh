@@ -15,11 +15,22 @@ image_id_file="$root/fidus-live-debian12.image-id"
 }
 [[ "$(wc -l <"$checksum")" == 1 ]] || { echo "checksum must contain exactly one record" >&2; exit 2; }
 [[ "$(awk '{print NF}' "$checksum")" == 2 ]] || { echo "malformed checksum record" >&2; exit 2; }
+checksum_name=$(awk '{print $2}' "$checksum")
+[[ "$checksum_name" == "$(basename "$archive")" ]] || {
+  echo "checksum names a different artifact" >&2
+  exit 2
+}
 sha256sum -c "$checksum"
 zstd -t "$archive"
+archive_sha256=$(sha256sum "$archive" | awk '{print $1}')
+archive_size=$(stat -c '%s' "$archive")
 image_id=$(tr -d '\r\n' <"$image_id_file")
 [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "malformed image ID" >&2; exit 2; }
 grep -q '"schema_version": 1' "$manifest" || { echo "unsupported release manifest" >&2; exit 2; }
+grep -q '"filename": "'"$(basename "$archive")"'"' "$manifest" || { echo "manifest artifact mismatch" >&2; exit 2; }
+grep -q '"sha256": "'"$archive_sha256"'"' "$manifest" || { echo "manifest hash mismatch" >&2; exit 2; }
+grep -q '"size_bytes": '"$archive_size"',' "$manifest" || { echo "manifest size mismatch" >&2; exit 2; }
+grep -q '"image_id": "'"$image_id"'"' "$manifest" || { echo "manifest image ID mismatch" >&2; exit 2; }
 tag="fidus-release-verify-$$"
 cleanup() { docker image rm "$tag" >/dev/null 2>&1 || true; }
 trap cleanup EXIT

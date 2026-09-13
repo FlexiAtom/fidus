@@ -16,7 +16,7 @@
   "source": {
     "commit": "5b8949cca4edb9a645d9552bb1766f8431bd120a",
     "tree": "e977917e30a38b825bc4fe2a9bf188026247c564",
-    "working_tree": "modified-after-commit"
+    "working_tree": "release-artifact-built-before-local-closure"
   },
   "inputs": {
     "cargo_lock_sha256": "0157902be9e85ec5f1333e0857ec86647c9cb8a4e530368f26b39569b7b7fac5",

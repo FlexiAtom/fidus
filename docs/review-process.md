@@ -105,7 +105,7 @@ P5 output mutation/recovery 提案已获人工批准，草案全审有条件通�
 ```text
 review_level: full
 reviewer: 主代理 + 916b15e8-89a4-43fc-abcc-69219758c39b + 95d356ee-c66e-4a52-bf5e-3bfdba07daa1 + bf47f0d5-301a-486a-9c4a-1710f8adca89
-input_revision: 1132b79 + uncommitted audit fixes
+input_revision: fbb2fae + release verification follow-up
 previous_decision: conditional (initial full review)
 decision: conditional
 skipped_checks: 真实桌面错误处理单点验证（用户要求挂起）；跨机器发布验证（项目级挂起）；shellcheck（环境未安装）；真实 compositor 异常注入
