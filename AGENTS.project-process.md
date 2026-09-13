@@ -106,7 +106,7 @@ P5 的实现工作完成后，下一阶段不是立即发布，而是对整个�
 1. **保持 P5 无显示回归全绿**：F1–F42 逐项映射见 `docs/measurements/p5-f1-f42-matrix.md`；当前 real-pending 项不得伪造为 pass。
 2. **保持 exit-code/summary 语义一致**：`not_requested | confirmed | unverified`、recovery code 4、child/timeout/external-change 和唯一 summary 已由 runner fake 回归覆盖。
 3. **全量审查已完成（有条件通过）**：审查记录见 `docs/review-process.md` §6；当前提交级和本机工具链门禁已通过，仍需完成下列本地收口项，不能宣称项目完全收口。
-4. **后续本地收口**：已补 runner 原子 lock/path 安全、后代进程确认、`ResultRecord` 防 panic，并加入机器可读 F1–F42 校验、无显示 runner 回归和初版 release manifest；完整 Rust 门禁仍受当前 Cargo 离线缓存缺失影响，SBOM/signature/attestation 尚未提供。
+4. **后续本地收口**：已补 runner 原子 lock/path 安全、后代进程确认、`ResultRecord` 防 panic，并加入机器可读 F1–F42 校验、无显示 runner 回归和初版 release manifest；Rust、脚本、矩阵和文档门禁已重新通过，SBOM/signature/attestation 尚未提供。
 5. **处理挂起事项**：只有获得适当环境和明确授权后，分别恢复跨机器发布验证与真实桌面错误处理单点验证。
 6. **审查通过后再决定发布**：push 或发布仍需单独确认，不因全量审查有条件通过而自动执行。
 
