@@ -100,7 +100,23 @@
 
 P5 output mutation/recovery 提案已获人工批准，草案全审有条件通过，方案已并入 `docs/spec.md` §8.7。当前草案为 [`docs/drafts/P5-output-mutation-recovery.md`](drafts/P5-output-mutation-recovery.md)，已定义宿主 adapter、快照、状态机、锁、失败优先级和 fake adapter F1–F42；全审已发现并修正生命周期早退、未授权分支、NameOnly 误确认、矩阵聚合、信号监督、锁原子性和 parser 边界问题。七项设计决策已写入草案，其中 recovery 三值已落到 `fidus-test` parser 和单测；最小 `scripts/output_mutation_runner.sh` 和 fake Niri 回归已实现；审计覆盖显式授权、snapshot 后早退恢复、recovery 优先、实际 PGID、symlink lock、ASCII 控制字符、malformed/deferred parser 和 flock 竞争。真实 Niri 异常路径、完整 timeout/signal 矩阵和跨 compositor 身份证明仍是后续验收门槛。其中“真实桌面错误处理单点验证”按用户要求挂起；“跨机器发布验证”同样挂起，二者均不得标记为通过。本轮 `cargo test/clippy/doc` 尝试因 Cargo registry 缓存目录只读而未启动：默认缓存报 Read-only file system，项目内离线缓存缺少 `thiserror`；不得将该次尝试记为 Rust 验证通过。实际实验已完成：只读 probe 通过；recovery parser 4/4 通过；`flock` 抢锁拒绝/释放后重获通过；`setsid` 实际 PGID 进程组 TERM→KILL 回收通过；临时信号/恢复模型 5/5 通过；当前 Niri 的 scale apply/read-back/restore 和 transform canonical read-back/restore 通过。
 
-## 6. 审查记录要求
+## 6. P5 后全项目全量审查记录（修复后工作树）
+
+```text
+review_level: full
+reviewer: 主代理 + 916b15e8-89a4-43fc-abcc-69219758c39b + 95d356ee-c66e-4a52-bf5e-3bfdba07daa1 + bf47f0d5-301a-486a-9c4a-1710f8adca89
+input_revision: 1132b79 + uncommitted audit fixes
+previous_decision: conditional (initial full review)
+decision: conditional
+skipped_checks: 真实桌面错误处理单点验证（用户要求挂起）；跨机器发布验证（项目级挂起）；shellcheck（环境未安装）；真实 compositor 异常注入
+findings: 初审发现的 trailing whitespace、P5 历史状态漂移、F1-F42 映射缺失、runner timeout/外部修改/summary/recovery 缺口、wrapper correlation 缺口和未知 mode 回退已修复；P3 方向状态、P4 重复候选章节、根 README P4/P5 缺项和相关历史表述已标注/同步；F1/F8/F16/F21/F28/F30/F33/F38 与两项项目级验证保持 real-pending；发布 provenance/SBOM/signature/registry manifest 仍未提供
+verification: cargo test --workspace、cargo clippy --workspace --all-targets -- -D warnings、cargo doc --workspace --no-deps、bash -n scripts/*.sh、git diff --check、scripts/test_output_mutation_runner.sh 全部通过；使用 CARGO_HOME=/tmp/fidus-cargo-p5、CARGO_TARGET_DIR=/tmp/fidus-target-p5
+next_step: 提交本次审查修复；保持两项挂起；不执行真实 compositor 异常实验或 push
+```
+
+本次全量审查结论为**有条件通过／未收口**：当前代码和文档修复已通过本机可执行门禁，但不能宣称 P5 完整完成或跨机器验证完成。剩余 real-pending 项和发布 provenance/SBOM/signature 等发布增强项必须保持明确边界。
+
+## 7. 审查记录要求
 
 每次对提案执行快审或全审，至少记录：
 

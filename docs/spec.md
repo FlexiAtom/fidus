@@ -692,7 +692,7 @@ P5 当前保守退出码真值表如下；恢复未被稳定身份或 read-back 
 | **P2** | L0 Anchor（通用兜底）+ C 层 L1/L8/L7 增量追踪 | 覆盖无 layer-shell 环境。✅ 已完成（P2-a…P2-g） |
 | **P3** | ~~L10 GradientField~~ **已否决**（§4.2） | 提案阶段实测推翻原设计 |
 | **P4** | `fidus-test` 跨环境测试子项目方案（§8） | 先实现 `ci`，再 `live-host`，最后显式实验 `live-container`；脚本、专用 crate、容器按职责共存 |
-| **P5** | 宿主 output mutation/recovery 方案（§8.7） | 方案已冻结；真实 host adapter、supervisor 和异常恢复仍未实现，不得默认修改用户桌面 |
+| **P5** | 宿主 output mutation/recovery 方案（§8.7） | 最小显式 runner、无显示回归和保守 recovery 语义已实现；真实异常实验、稳定 identity 和跨机器验证仍有明确挂起，不得默认修改用户桌面 |
 
 > **重要顺序**：先确立"零信任 + 概率池纯净"的架构约束，再写校准器代码。这与 v0.4 把 C shim 当 P3 的顺序**完全相反**。
 

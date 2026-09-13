@@ -25,8 +25,13 @@ fn run_live_calibrate() -> ExitCode {
     let run_id = format!("pid{}", std::process::id());
     let mode = match std::env::var("FIDUS_EXECUTION_MODE").as_deref() {
         Ok("ci") => "ci",
+        Ok("live-host") => "live-host",
         Ok("live-container") => "live-container",
-        _ => "live-host",
+        Ok(unknown) => {
+            eprintln!("harness error: unknown FIDUS_EXECUTION_MODE={unknown}");
+            return ExitCode::from(3);
+        }
+        Err(_) => "live-host",
     };
     let binary = std::env::var_os("FIDUS_LIVE_CALIBRATE_BIN")
         .unwrap_or_else(|| "fidus-live-calibrate".into());
@@ -54,7 +59,7 @@ fn run_live_calibrate() -> ExitCode {
             }
         }
     }
-    if let Err(error) = fidus_test::validate_run(&records) {
+    if let Err(error) = fidus_test::validate_run_for(&records, Some(&run_id), Some(mode)) {
         eprintln!("protocol error: {error}");
         return ExitCode::from(3);
     }

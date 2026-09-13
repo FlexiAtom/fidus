@@ -279,6 +279,18 @@ pub fn summary_for(records: &[ResultRecord]) -> Result<ResultRecord, ParseError>
 
 /// Validates a complete run and returns its unique terminal summary.
 pub fn validate_run(records: &[ResultRecord]) -> Result<&ResultRecord, ParseError> {
+    validate_run_for(records, None, None)
+}
+
+/// Validates a run and, when supplied, binds it to the caller's correlation.
+///
+/// The wrapper owns the run id and execution mode. Without this second check a
+/// child could emit a valid but unrelated run and still be counted as this run.
+pub fn validate_run_for<'a>(
+    records: &'a [ResultRecord],
+    expected_run_id: Option<&str>,
+    expected_execution_mode: Option<&str>,
+) -> Result<&'a ResultRecord, ParseError> {
     let first = records.first().ok_or(ParseError::MissingSummary)?;
     let mut summaries = records.iter().filter(|r| r.kind == "summary");
     let summary = summaries.next().ok_or(ParseError::MissingSummary)?;
@@ -293,6 +305,14 @@ pub fn validate_run(records: &[ResultRecord]) -> Result<&ResultRecord, ParseErro
     }) {
         return Err(ParseError::InconsistentRun(
             "run_id or execution_mode differs".into(),
+        ));
+    }
+    if expected_run_id.is_some_and(|expected| first.run_id != expected)
+        || expected_execution_mode
+            .is_some_and(|expected| first.fields["execution_mode"] != expected)
+    {
+        return Err(ParseError::InconsistentRun(
+            "run does not match wrapper correlation".into(),
         ));
     }
     let total = parse_count(summary, "records_total")?;
@@ -502,6 +522,33 @@ mod tests {
             parse_result_line(unknown),
             Err(ParseError::InvalidValue(_))
         ));
+    }
+
+    #[test]
+    fn wrapper_binding_rejects_unrelated_run_or_mode() {
+        let records = vec![
+            parse_result_line(&line(
+                "environment",
+                "backend=none compositor=none output=none scale=1 transform=normal",
+            ))
+            .unwrap()
+            .unwrap(),
+            parse_result_line(&line(
+                "summary",
+                "records_total=1 records_ok=1 records_failed=0",
+            ))
+            .unwrap()
+            .unwrap(),
+        ];
+        assert!(matches!(
+            validate_run_for(&records, Some("other"), Some("ci")),
+            Err(ParseError::InconsistentRun(_))
+        ));
+        assert!(matches!(
+            validate_run_for(&records, Some("r"), Some("live-host")),
+            Err(ParseError::InconsistentRun(_))
+        ));
+        assert!(validate_run_for(&records, Some("r01"), Some("ci")).is_ok());
     }
 
     #[test]
@@ -924,13 +971,12 @@ mod output_mutation_tests {
     #[test]
     fn summary_fold_preserves_recovery_over_child_and_timeout() {
         let outcomes = ["child=0", "timeout=1", "recovery=unverified"];
-        let final_status = if outcomes.contains(&"recovery=unverified")
-            || outcomes.contains(&"timeout=1")
-        {
-            ("failed", 4)
-        } else {
-            ("ok", 0)
-        };
+        let final_status =
+            if outcomes.contains(&"recovery=unverified") || outcomes.contains(&"timeout=1") {
+                ("failed", 4)
+            } else {
+                ("ok", 0)
+            };
         assert_eq!(final_status, ("failed", 4));
     }
 

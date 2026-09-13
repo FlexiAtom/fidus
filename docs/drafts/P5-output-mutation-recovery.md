@@ -1,6 +1,7 @@
 # 草案：宿主 output mutation 与恢复状态机
 
-> **状态：✅ 草案全审有条件通过；尚未进入方案，也未实现生产 mutation。**
+> **历史阶段记录：草案全审有条件通过（2026-09）。**
+> 当前状态：方案已并入 [`docs/spec.md §8.7`](../spec.md)，最小显式 runner 已实现；真实 compositor 异常路径和跨机器验证仍挂起。
 >
 > 对应提案：[`docs/proposals/P5-output-mutation-recovery.md`](../proposals/P5-output-mutation-recovery.md)。
 > 本草案只确定接口、状态机、失败语义和测试边界；真实 compositor runner 必须在草案全审通过后实现。
@@ -507,15 +508,15 @@ SIGKILL、宿主崩溃和 compositor 重启只做分类实验，不做恢复成�
 | 1 | fake adapter F1–F42 | 接受为唯一无显示服务器的状态机验收层；不作为 Niri 证据 | 临时模型实验 11/11 通过；`fidus-test` 已加入 12 个 P5 测试函数，并以可写 Cargo 缓存通过 27/27 crate 测试、clippy 和 doc；正式覆盖仍不等于真实 Niri 证据 |
 | 2 | recovery 协议值 | v1 冻结 `not_requested` / `confirmed` / `unverified`；未知值拒绝 | parser 实际实验 4/4 通过，单测已补；producer 仍待方案阶段接入 |
 | 3 | Niri parser fixture | 采用版本化 grammar；缺失/重复/控制字符/截断/未知格式 fail-closed；transform 使用 canonical enum | 实机输出形状 7/7、合成歧义边界 3/3、FIDUS_RESULT 协议边界 7/7 通过；`90` 读回 `90° counter-clockwise`；已加入 `NIRI_OUTPUTS_V25_FIXTURE` 和 deferred fixture 测试；仍不等于真实 parser adapter |
-| 4 | canonical lock/stale lock | 宿主 session canonical lock；优先内核 advisory lock；stale 不自动删除 | `flock` 抢占拒绝/释放后重获、symlink 检测、PID metadata 不绕过锁通过；release 失败和人工清理审计仍待正式 fake 实验 |
-| 5 | signal supervisor | 宿主独立监督 child 进程组；TERM→有限等待→KILL；恢复期防重入 | `scripts/output_mutation_runner.sh` 已实现实际 PGID 读取、TERM→bounded wait→KILL→wait；fake child 回归通过；真实超时/信号异常路径仍待补齐 |
-| 6 | failure/matrix/exit truth table | 恢复失败最高优先；默认首个 case 失败即停止；summary 由宿主唯一生成 | recovery 三值已落 parser 单测；runner 已验证 child 非零码透传和恢复后结果；完整 F1–F42 矩阵与正式 summary 聚合仍待补齐 |
+| 4 | canonical lock/stale lock | 宿主 session canonical lock；优先内核 advisory lock；stale 不自动删除 | `flock` 抢占拒绝/释放后重获、symlink 检测、PID metadata 不绕过锁、并发竞争通过；真实 release failure 仍挂起 |
+| 5 | signal supervisor | 宿主独立监督 child 进程组；TERM→有限等待→KILL；恢复期防重入 | runner 已实现实际 PGID、timeout、TERM→bounded wait→KILL→wait；fake child 回归通过；真实信号异常路径挂起 |
+| 6 | failure/matrix/exit truth table | 恢复失败最高优先；默认首个 case 失败即停止；summary 由宿主唯一生成 | recovery 三值、code 4、child/timeout/external-change 优先级和单一 lifecycle+summary 已通过 fake 回归；F1–F42 映射见 `docs/measurements/p5-f1-f42-matrix.md` |
 | 7 | 活动桌面实机门槛 | 必须假设用户持续使用；只验证本机 Niri 行为；NameOnly 不得 confirmed | scale/transform 正常路径字段恢复通过；canonical transform 已验证；NameOnly 仍为 unverified；异常路径未做桌面实验 |
 
-## 11. 草案全审结论
+## 11. 草案全审结论（历史快照）
 
 ```text
 有条件通过；七项设计决策已完成，允许转入方案编写；不允许直接实现真实 mutation。
 ```
 
-转方案前仍需把第 1、3、4、5、6、7 项的实验结果落档。已完成的协议决策不能被这些实验重新放宽：NameOnly 永远不能升级为稳定身份，SIGKILL/宿主崩溃/compositor 重启永远不能声称恢复成功。
+上述结论是草案阶段记录。当前已进入方案并实现最小显式 runner；当前 runner 的无显示回归、timeout、外部修改保护、单一 lifecycle+summary 输出和 F1–F42 映射见 `docs/measurements/p5-f1-f42-matrix.md`。真实桌面错误处理单点验证与跨机器发布验证仍保持挂起。已完成的协议决策不能被这些实验重新放宽：NameOnly 永远不能升级为稳定身份，SIGKILL/宿主崩溃/compositor 重启永远不能声称恢复成功。

@@ -295,6 +295,8 @@ transform ∈ {normal, 90, 180, 270}
 
 ## 9. 必须先做的实验
 
+> **历史阶段记录（提案审查时）**：本节记录当时的准入条件，不限制已经进入方案和实现的当前状态。当前规范见 [`docs/spec.md §8.7`](../spec.md)，当前进程与挂起事项见 [`AGENTS.project-process.md`](../../AGENTS.project-process.md)。
+
 提案批准前，不实现正式 mutation runner；只允许用可控 fake compositor adapter 验证状态机：
 
 1. 正常 apply → run → restore；
@@ -330,6 +332,8 @@ transform ∈ {normal, 90, 180, 270}
 
 ## 11. 方案判断
 
+> **历史快照（提案阶段，2026-09）**：以下判断记录提案当时的审查结论；后续草案、方案和实现已经完成对应准入，但真实异常实验与跨机器验证仍挂起。
+
 当前建议：**接受提案方向，但暂不进入草案。**
 
 理由：
@@ -341,7 +345,7 @@ transform ∈ {normal, 90, 180, 270}
 - mutation 会改变用户正在使用的电脑，真实实验必须默认用户有活动；
 - `SIGKILL`、宿主崩溃和 compositor 重启仍不可证明恢复。
 
-提案批准后，下一步应是：
+提案批准后，下一步应是（历史流程记录）：
 
 ```text
 fake adapter 状态机实验

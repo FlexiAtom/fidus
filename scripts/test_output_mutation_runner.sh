@@ -19,7 +19,7 @@ set -u
 state=${FIDUS_FAKE_STATE:?}
 if [[ "$*" == "msg outputs" ]]; then
   if [[ "${FIDUS_FAKE_OUTPUT_MODE:-normal}" == malformed ]]; then
-    printf 'Output "Panel" (eDP-1)\n  Scale: 1.25\n' 
+    printf 'Output "Panel" (eDP-1)\n  Scale: 1.25\n'
     exit 0
   fi
   if [[ "${FIDUS_FAKE_OUTPUT_MODE:-normal}" == deferred ]]; then

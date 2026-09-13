@@ -113,7 +113,9 @@ crates/fidus-test/
 
 保留的诊断能力：单标记投射与截图、marker/no-marker 对照、burst 连续采样、cycle 模式以及变化像素诊断。它不是“校准成功”的证明。
 
-### 3.2 `fidus-probe-marker`
+### 3.2（历史候选）`fidus-probe-marker`
+
+> **历史候选，未采用**：早期版本曾建议从现有诊断二进制迁入；后续审查裁决保留在 `fidus` 伞 crate，当前决策见上一个 3.2 小节。
 
 从现有诊断二进制迁入，保留：
 

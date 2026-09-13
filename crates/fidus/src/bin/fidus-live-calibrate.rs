@@ -22,8 +22,10 @@ use fidus::prelude::*;
 fn protocol_context() -> (String, String) {
     let mode = match std::env::var("FIDUS_EXECUTION_MODE").as_deref() {
         Ok("ci") => "ci",
+        Ok("live-host") => "live-host",
         Ok("live-container") => "live-container",
-        _ => "live-host",
+        Ok(_) => "invalid",
+        Err(_) => "live-host",
     };
     let requested_id =
         std::env::var("FIDUS_RUN_ID").unwrap_or_else(|_| format!("pid{}", std::process::id()));
@@ -84,6 +86,10 @@ fn compositor_token(kind: &fidus_core::env::CompositorKind) -> &'static str {
 
 fn main() {
     let (mode, run_id) = protocol_context();
+    if mode == "invalid" {
+        eprintln!("harness error: unknown FIDUS_EXECUTION_MODE");
+        std::process::exit(3);
+    }
     let choice = match std::env::var("FIDUS_BACKEND").as_deref() {
         Ok("wayland") | Ok("wayland-layer") => BackendChoice::WaylandLayer,
         Ok("x11") => BackendChoice::X11,
