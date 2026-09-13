@@ -1,0 +1,43 @@
+id	status	evidence_kind	command	spec_ref
+1	real-pending	compositor	manual-authorized-real-desktop	spec-8.7
+2	pass	fake	bash scripts/test_output_mutation_runner.sh	spec-8.7
+3	pass	fake	bash scripts/test_live_container.sh	spec-8.7
+4	pass	fake	bash scripts/test_output_mutation_runner.sh	spec-8.7
+5	pass	fake	bash scripts/test_output_mutation_runner.sh	spec-8.7
+6	pass	fake	bash scripts/test_output_mutation_runner.sh	spec-8.7
+7	pass	fake	bash scripts/test_output_mutation_runner.sh	spec-8.7
+8	real-pending	host	manual-authorized-real-desktop	spec-8.7
+9	pass	fake	bash scripts/test_output_mutation_runner.sh	spec-8.7
+10	pass	protocol	cargo test -p fidus-test	spec-8.7
+11	pass	fake	bash scripts/test_output_mutation_runner.sh	spec-8.7
+12	pass	protocol	cargo test -p fidus-test	spec-8.7
+13	pass	fake	bash scripts/test_output_mutation_runner.sh	spec-8.7
+14	pass	protocol	cargo test -p fidus-test	spec-8.7
+15	pass	protocol	cargo test -p fidus-test	spec-8.7
+16	real-pending	host	manual-authorized-real-desktop	spec-8.7
+17	pass	fake	bash scripts/test_output_mutation_runner.sh	spec-8.7
+18	pass	fake	bash scripts/test_output_mutation_runner.sh	spec-8.7
+19	pass	fake	bash scripts/test_output_mutation_runner.sh	spec-8.7
+20	pass	fake	bash scripts/test_output_mutation_runner.sh	spec-8.7
+21	real-pending	host	manual-authorized-real-desktop	spec-8.7
+22	pass	protocol	cargo test -p fidus-test	spec-8.7
+23	pass	protocol	cargo test -p fidus-test	spec-8.7
+24	pass	protocol	cargo test -p fidus-test	spec-8.7
+25	pass	fake	bash scripts/test_output_mutation_runner.sh	spec-8.7
+26	pass	fake	bash scripts/test_output_mutation_runner.sh	spec-8.7
+27	pass	fake	bash scripts/test_output_mutation_runner.sh	spec-8.7
+28	real-pending	host	manual-authorized-real-desktop	spec-8.7
+29	pass	fake	bash scripts/test_output_mutation_runner.sh	spec-8.7
+30	real-pending	compositor	manual-authorized-real-desktop	spec-8.7
+31	pass	fake	bash scripts/test_output_mutation_runner.sh	spec-8.7
+32	pass	protocol	cargo test -p fidus-test	spec-8.7
+33	real-pending	host	manual-authorized-real-desktop	spec-8.7
+34	pass	protocol	cargo test -p fidus-test	spec-8.7
+35	pass	protocol	cargo test -p fidus-test	spec-8.7
+36	pass	fake	bash scripts/test_output_mutation_runner.sh	spec-8.7
+37	pass	protocol	cargo test -p fidus-test	spec-8.7
+38	real-pending	host	manual-authorized-real-desktop	spec-8.7
+39	pass	fake	bash scripts/test_output_mutation_runner.sh	spec-8.7
+40	pass	fake	bash scripts/test_output_mutation_runner.sh	spec-8.7
+41	pass	fake	bash scripts/test_output_mutation_runner.sh	spec-8.7
+42	pass	fake	bash scripts/test_output_mutation_runner.sh	spec-8.7

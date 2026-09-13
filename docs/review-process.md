@@ -111,7 +111,7 @@ decision: conditional
 skipped_checks: 真实桌面错误处理单点验证（用户要求挂起）；跨机器发布验证（项目级挂起）；shellcheck（环境未安装）；真实 compositor 异常注入
 findings: 初审发现的 trailing whitespace、P5 历史状态漂移、F1-F42 映射缺失、runner timeout/外部修改/summary/recovery 缺口、wrapper correlation 缺口和未知 mode 回退已修复；P3 方向状态、P4 重复候选章节、根 README P4/P5 缺项和相关历史表述已标注/同步；F1/F8/F16/F21/F28/F30/F33/F38 与两项项目级验证保持 real-pending；发布 provenance/SBOM/signature/registry manifest 仍未提供
 verification: cargo test --workspace、cargo clippy --workspace --all-targets -- -D warnings、cargo doc --workspace --no-deps、bash -n scripts/*.sh、git diff --check、scripts/test_output_mutation_runner.sh 全部通过；使用 CARGO_HOME=/tmp/fidus-cargo-p5、CARGO_TARGET_DIR=/tmp/fidus-target-p5
-next_step: 提交本次审查修复；保持两项挂起；不执行真实 compositor 异常实验或 push
+next_step: 已完成本轮本地收口补丁；保持两项挂起；不执行真实 compositor 异常实验或 push；待 Rust 门禁环境恢复后重跑全量检查
 ```
 
 本次全量审查结论为**有条件通过／未收口**：当前代码和文档修复已通过本机可执行门禁，但不能宣称 P5 完整完成或跨机器验证完成。剩余 real-pending 项和发布 provenance/SBOM/signature 等发布增强项必须保持明确边界。

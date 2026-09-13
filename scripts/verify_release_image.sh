@@ -7,17 +7,23 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 archive=${1:-"$root/fidus-live-debian12.tar.zst"}
 checksum=${archive}.sha256
-[[ -f "$archive" && -f "$checksum" ]] || {
-  echo "release artifact or checksum is missing" >&2
+manifest=${FIDUS_RELEASE_MANIFEST:-"$root/fidus-live-debian12.manifest.json"}
+image_id_file="$root/fidus-live-debian12.image-id"
+[[ -f "$archive" && -f "$checksum" && -f "$manifest" && -f "$image_id_file" ]] || {
+  echo "release artifact, checksum, manifest, or image ID is missing" >&2
   exit 2
 }
+[[ "$(wc -l <"$checksum")" == 1 ]] || { echo "checksum must contain exactly one record" >&2; exit 2; }
+[[ "$(awk '{print NF}' "$checksum")" == 2 ]] || { echo "malformed checksum record" >&2; exit 2; }
 sha256sum -c "$checksum"
 zstd -t "$archive"
+image_id=$(tr -d '\r\n' <"$image_id_file")
+[[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "malformed image ID" >&2; exit 2; }
+grep -q '"schema_version": 1' "$manifest" || { echo "unsupported release manifest" >&2; exit 2; }
 tag="fidus-release-verify-$$"
-cleanup() { docker image rm "$tag" fidus-live:debian12 >/dev/null 2>&1 || true; }
+cleanup() { docker image rm "$tag" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 zstd -dc "$archive" | docker load >/dev/null
-image_id=$(cat "$root/fidus-live-debian12.image-id")
 actual_id=$(docker image inspect fidus-live:debian12 --format '{{.Id}}')
 docker tag fidus-live:debian12 "$tag"
 [[ "$actual_id" == "$image_id" ]] || {

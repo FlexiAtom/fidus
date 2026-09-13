@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "artifact": {
+    "filename": "fidus-live-debian12.tar.zst",
+    "size_bytes": 39276475,
+    "sha256": "40e3008f82cb4e8e457f06375d92da9ae91aa1c15a07aab359e8f114d9513f69",
+    "compression": "zstd"
+  },
+  "image": {
+    "reference": "fidus-live:debian12",
+    "image_id": "sha256:c0e90aa9631003f96926a7ee6825863ef2b06d740029042acb79a03ce8aca7b5",
+    "os": "linux",
+    "architecture": "unknown-until-inspected",
+    "entrypoint": ["fidus-test"]
+  },
+  "source": {
+    "commit": "5b8949cca4edb9a645d9552bb1766f8431bd120a",
+    "tree": "e977917e30a38b825bc4fe2a9bf188026247c564",
+    "working_tree": "modified-after-commit"
+  },
+  "inputs": {
+    "cargo_lock_sha256": "0157902be9e85ec5f1333e0857ec86647c9cb8a4e530368f26b39569b7b7fac5",
+    "dockerfile_sha256": "95dadd4ebddcadbd1bc232467f97896981052d825c38254bd4c209a300376b96",
+    "verify_script_sha256": "a6893060ddc5b98cec9b5c33143b43c6361357b24320e97bccea6cc8164ccbdd",
+    "rust_toolchain": "1.86.0",
+    "base_image": "docker.m.daocloud.io/library/debian:12-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171"
+  },
+  "p5_gate": {
+    "matrix": "docs/measurements/p5-f1-f42-matrix.tsv",
+    "pass": 34,
+    "real_pending": 8,
+    "blocked": 0,
+    "complete": false
+  },
+  "provenance": {
+    "sbom": null,
+    "signature": null,
+    "attestation": null,
+    "cross_machine_validation": "pending"
+  }
+}

@@ -12,6 +12,7 @@ The image was built from:
 - Rust toolchain: `1.86.0`, downloaded through `https://rsproxy.cn`
 - image ID: see `fidus-live-debian12.image-id`
 - archive SHA-256: see `fidus-live-debian12.tar.zst.sha256`
+- release manifest: see `fidus-live-debian12.manifest.json` (SBOM, signature, attestation, and cross-machine validation remain unavailable)
 
 ## Import
 

@@ -15,6 +15,15 @@ if [[ -e /dev/dri ]]; then
   exit 2
 fi
 
-cargo test --workspace --offline
-cargo clippy --workspace --all-targets --offline -- -D warnings
-cargo doc --workspace --no-deps --offline
+for script in scripts/*.sh; do
+  bash -n "$script"
+done
+# The workspace is not currently rustfmt-clean; keep formatting advisory until
+# a dedicated formatting-only change can avoid mixing unrelated rewrites.
+bash scripts/check_p5_matrix.sh
+bash scripts/test_output_mutation_runner.sh
+# The live-container contract's positive path requires a real display socket;
+# keep it out of deterministic no-display CI and run it in its dedicated job.
+cargo test --locked --workspace --offline
+cargo clippy --locked --workspace --all-targets --offline -- -D warnings
+cargo doc --locked --workspace --no-deps --offline

@@ -101,17 +101,46 @@ read_output() {
   printf '%s\t%s\n' "$scale" "$transform"
 }
 
-# The kernel-held descriptor, not metadata, is the ownership proof.
-[[ ! -L "$lock_path" ]] || {
+# Open the lock without following a symlink. The shell's redirection cannot
+# express O_NOFOLLOW, so reserve the pathname atomically with mkdir and keep a
+# regular lock file inside that private directory. A stale directory is treated
+# as busy rather than deleted: guessing stale ownership could steal an active
+# session. The directory is removed only after releasing the kernel lock.
+if [[ -L "$lock_path" ]]; then
   echo "HarnessError: mutation lock path is a symlink" >&2
   exit 3
+fi
+if ! mkdir "$lock_path" 2>/dev/null; then
+  echo "HarnessError: another mutation runner owns the session lock" >&2
+  exit 3
+fi
+lock_file="$lock_path/lock"
+: >"$lock_file" || {
+  rmdir "$lock_path" 2>/dev/null || true
+  echo "EnvironmentUnavailable: cannot create lock file" >&2
+  exit 2
 }
-exec 9>"$lock_path" || { echo "EnvironmentUnavailable: cannot open lock" >&2; exit 2; }
-flock -n 9 || { echo "HarnessError: another mutation runner owns the session lock" >&2; exit 3; }
+exec 9<"$lock_file" || {
+  rm -f "$lock_file"
+  rmdir "$lock_path" 2>/dev/null || true
+  echo "EnvironmentUnavailable: cannot open lock" >&2
+  exit 2
+}
+flock -n 9 || {
+  exec 9>&-
+  rm -f "$lock_file"
+  rmdir "$lock_path" 2>/dev/null || true
+  echo "HarnessError: another mutation runner owns the session lock" >&2
+  exit 3
+}
 
 snapshot=$(read_output) || {
   echo "EnvironmentUnavailable: cannot read exactly one connected output" >&2
-  flock -u 9; exec 9>&-; exit 2
+  flock -u 9
+  exec 9>&-
+  rm -f "$lock_file" 2>/dev/null || true
+  rmdir "$lock_path" 2>/dev/null || true
+  exit 2
 }
 # Install the EXIT cleanup immediately after snapshot. Any later setup failure
 # can follow a partial apply or leave a changed output, so it must not bypass
@@ -123,6 +152,9 @@ summary_emitted=0
 child_status=0
 child_pid=
 child_pgid=
+child_sid=
+child_cleanup_verified=0
+child_escape_detected=0
 interrupted=0
 timeout_hit=0
 external_change=0
@@ -148,20 +180,45 @@ child_alive() {
   [[ -n "$stat" && "$stat" != Z* ]]
 }
 
+session_processes() {
+  [[ -n "$child_sid" ]] || return 0
+  # A process can change its process group, so PGID-only cleanup is not a
+  # proof.  The setsid-created session ID is the stronger boundary we can
+  # inspect portably with procps.  If a child calls setsid itself, it escapes
+  # this boundary; we report that limitation instead of claiming cleanup.
+  ps -eo pid=,sid=,stat= 2>/dev/null |
+    awk -v sid="$child_sid" '$2 == sid && $3 !~ /^Z/ { print $1 }'
+}
+
+child_session_alive() {
+  [[ -n "$child_pid" ]] && [[ -n "$(session_processes)" ]]
+}
+
 stop_child_group() {
   [[ -n "$child_pid" ]] || return 0
-  if child_alive; then
-    kill -TERM -- "-$child_pgid" 2>/dev/null || kill -TERM "$child_pid" 2>/dev/null || true
+  if child_alive || child_session_alive; then
+    kill -TERM -- "-$child_pgid" 2>/dev/null || true
+    # Also signal session members whose process groups changed. This is best
+    # effort: an escaping process is not reachable through the session ID and
+    # therefore must make recovery unverified rather than being misreported.
+    while read -r pid; do kill -TERM "$pid" 2>/dev/null || true; done < <(session_processes)
     local deadline=$((SECONDS + timeout_seconds))
-    while child_alive && ((SECONDS < deadline)); do
+    while child_alive || child_session_alive; do
+      ((SECONDS >= deadline)) && break
       sleep 0.1
     done
-    if child_alive; then
+    if child_alive || child_session_alive; then
       timeout_hit=1
-      kill -KILL -- "-$child_pgid" 2>/dev/null || kill -KILL "$child_pid" 2>/dev/null || true
+      kill -KILL -- "-$child_pgid" 2>/dev/null || true
+      while read -r pid; do kill -KILL "$pid" 2>/dev/null || true; done < <(session_processes)
     fi
   fi
   wait "$child_pid" 2>/dev/null || true
+  if [[ -n "$(session_processes)" ]]; then
+    child_escape_detected=1
+  else
+    child_cleanup_verified=1
+  fi
   child_pid=
   child_pgid=
 }
@@ -202,14 +259,20 @@ cleanup() {
   fi
   if [[ "$summary_emitted" == 0 && "$restore_attempted" == 1 ]]; then
     summary_emitted=1
+    teardown=unknown
+    if [[ "$timeout_hit" == 0 && "$child_escape_detected" == 0 && ( -z "$child_sid" || "$child_cleanup_verified" == 1 ) ]]; then
+      teardown=confirmed
+    fi
     printf 'FIDUS_RESULT version=1 kind=lifecycle run_id=p5-output status=unverified execution_mode=live-host teardown=%s recovery=unverified\n' \
-      "$([[ "$timeout_hit" == 1 ]] && echo unverified || echo confirmed)"
+      "$teardown"
     printf 'FIDUS_RESULT version=1 kind=summary run_id=p5-output status=failed execution_mode=live-host records_total=1 records_ok=0 records_failed=1\n'
     printf 'P5_DIAGNOSTIC timeout=%s external_change=%s\n' "$timeout_hit" "$external_change" >&2
   fi
   rm -f "$child_out" "$child_err"
   flock -u 9 2>/dev/null || true
   exec 9>&-
+  rm -f "$lock_file" 2>/dev/null || true
+  rmdir "$lock_path" 2>/dev/null || true
 }
 trap 'interrupted=1; trap - INT TERM; if [[ -n "$child_pgid" ]]; then kill -TERM -- "-$child_pgid" 2>/dev/null || true; fi; [[ "$state" == Running ]] && state=RestoreRequested' INT TERM
 trap cleanup EXIT
@@ -251,7 +314,8 @@ state=Running
 setsid -- "${command_args[@]}" >"$child_out" 2>"$child_err" &
 child_pid=$!
 child_pgid=$(ps -o pgid= -p "$child_pid" | tr -d ' ')
-if [[ -z "$child_pgid" || ! "$child_pgid" =~ ^[0-9]+$ ]]; then
+child_sid=$(ps -o sid= -p "$child_pid" | tr -d ' ')
+if [[ -z "$child_pgid" || ! "$child_pgid" =~ ^[0-9]+$ || -z "$child_sid" || ! "$child_sid" =~ ^[0-9]+$ ]]; then
   echo "HarnessError: cannot determine child process group" >&2
   finish 3
 fi
@@ -265,8 +329,9 @@ if child_alive; then
   child_status=124
 else
   wait "$child_pid" 2>/dev/null; child_status=$?
-  child_pid=
-  child_pgid=
+  # Keep the session identifiers until EXIT cleanup verifies that no descendant
+  # remains. Clearing them here would make a detached descendant invisible and
+  # would falsely turn teardown into a successful-looking result.
 fi
 finish "$child_status"
 

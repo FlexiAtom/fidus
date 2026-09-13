@@ -27,11 +27,34 @@ pub struct ResultRecord {
 }
 
 impl ResultRecord {
-    /// Encodes this validated record using the v1 line protocol.
-    pub fn to_line(&self) -> String {
+    /// Encodes this record using the v1 line protocol.
+    ///
+    /// Serialization is fallible because callers can construct a record directly;
+    /// malformed records must be rejected rather than causing a panic or emitting
+    /// a line that the protocol parser would interpret differently.
+    pub fn to_line(&self) -> Result<String, ParseError> {
+        let execution_mode = self
+            .fields
+            .get("execution_mode")
+            .ok_or(ParseError::MissingField("execution_mode"))?;
+        for (key, expected) in [
+            ("version", "1"),
+            ("kind", self.kind.as_str()),
+            ("run_id", self.run_id.as_str()),
+            ("status", self.status.as_str()),
+        ] {
+            if let Some(value) = self.fields.get(key) {
+                if value != expected {
+                    return Err(ParseError::InvalidValue(format!(
+                        "{key} does not match record"
+                    )));
+                }
+            }
+        }
+
         let mut line = format!(
             "FIDUS_RESULT version=1 kind={} run_id={} status={} execution_mode={}",
-            self.kind, self.run_id, self.status, self.fields["execution_mode"]
+            self.kind, self.run_id, self.status, execution_mode
         );
         for (key, value) in &self.fields {
             if !matches!(
@@ -44,7 +67,14 @@ impl ResultRecord {
                 line.push_str(value);
             }
         }
-        line
+
+        // Reuse the strict parser as the protocol's single validation boundary.
+        // This also rejects invalid keys, empty/whitespace-containing values, and
+        // schema-invalid records assembled outside the parser.
+        parse_result_line(&line)?.ok_or_else(|| {
+            ParseError::InvalidValue("serialized line lost its result prefix".into())
+        })?;
+        Ok(line)
     }
 }
 
@@ -573,9 +603,62 @@ mod tests {
         .unwrap()
         .unwrap();
         let summary = summary_for(std::slice::from_ref(&business)).unwrap();
-        let parsed = parse_result_line(&summary.to_line()).unwrap().unwrap();
+        let parsed = parse_result_line(&summary.to_line().unwrap())
+            .unwrap()
+            .unwrap();
         assert_eq!(parsed, summary);
         assert_eq!(validate_run(&[business, parsed]).unwrap().status, "ok");
+    }
+
+    #[test]
+    fn serialization_rejects_malformed_records_without_panicking() {
+        let mut missing_mode = ResultRecord {
+            kind: "summary".into(),
+            status: "ok".into(),
+            run_id: "r01".into(),
+            fields: BTreeMap::new(),
+        };
+        assert_eq!(
+            missing_mode.to_line(),
+            Err(ParseError::MissingField("execution_mode"))
+        );
+
+        missing_mode
+            .fields
+            .insert("execution_mode".into(), "ci".into());
+        assert!(matches!(
+            missing_mode.to_line(),
+            Err(ParseError::MissingField("records_total"))
+        ));
+
+        let mut invalid = missing_mode;
+        invalid.fields.insert("records_total".into(), "1".into());
+        invalid.fields.insert("records_ok".into(), "1".into());
+        invalid.fields.insert("records_failed".into(), "0".into());
+        invalid.run_id = "bad id".into();
+        assert!(matches!(
+            invalid.to_line(),
+            Err(ParseError::MalformedToken(_))
+        ));
+    }
+
+    #[test]
+    fn serialization_rejects_conflicting_common_fields() {
+        let mut record = ResultRecord {
+            kind: "summary".into(),
+            status: "ok".into(),
+            run_id: "r01".into(),
+            fields: BTreeMap::from([
+                ("execution_mode".into(), "ci".into()),
+                ("records_total".into(), "1".into()),
+                ("records_ok".into(), "1".into()),
+                ("records_failed".into(), "0".into()),
+                ("status".into(), "failed".into()),
+            ]),
+        };
+        assert!(matches!(record.to_line(), Err(ParseError::InvalidValue(_))));
+        record.fields.remove("status");
+        assert!(record.to_line().is_ok());
     }
 
     #[test]
@@ -962,9 +1045,11 @@ mod output_mutation_tests {
     fn descendants_share_the_session_group_cleanup_boundary() {
         let process_groups = [(101, 101), (102, 101), (103, 101)];
         let child_group = process_groups[0].1;
-        assert!(process_groups
-            .iter()
-            .all(|(_, group)| *group == child_group));
+        assert!(
+            process_groups
+                .iter()
+                .all(|(_, group)| *group == child_group)
+        );
         assert_eq!(process_groups.len(), 3);
     }
 

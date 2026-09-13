@@ -75,24 +75,26 @@ runner_output=$("$runner" --allow-output-mutation --output eDP-1 --scale 1.25 --
 [[ "$(grep -c 'kind=summary' <<<"$runner_output")" == 1 ]] || { echo 'expected one summary record' >&2; failures=$((failures + 1)); }
 [[ "$(grep -c 'recovery=unverified' <<<"$runner_output")" == 1 ]] || { echo 'expected unverified recovery' >&2; failures=$((failures + 1)); }
 [[ "$(<"$state")" == $'1\tnormal' ]] || { echo 'state was not restored' >&2; failures=$((failures + 1)); }
-rm -f "$XDG_RUNTIME_DIR/fidus-output-mutation.lock"
+rm -rf "$XDG_RUNTIME_DIR/fidus-output-mutation.lock"
 expect_rc 4 "$runner" --allow-output-mutation --output eDP-1 --scale 1.5 --transform 180 -- sh -c 'sleep 0.2; exit 7'
 [[ "$(<"$state")" == $'1\tnormal' ]] || { echo 'state was not restored after child failure' >&2; failures=$((failures + 1)); }
-rm -f "$XDG_RUNTIME_DIR/fidus-output-mutation.lock"
+rm -rf "$XDG_RUNTIME_DIR/fidus-output-mutation.lock"
 expect_rc 4 "$runner" --allow-output-mutation --timeout-seconds 1 --output eDP-1 --scale 1.5 --transform 180 -- sh -c 'sleep 5'
 [[ "$(<"$state")" == $'1\tnormal' ]] || { echo 'state was not restored after timeout' >&2; failures=$((failures + 1)); }
-rm -f "$XDG_RUNTIME_DIR/fidus-output-mutation.lock"
+rm -rf "$XDG_RUNTIME_DIR/fidus-output-mutation.lock"
 expect_rc 4 "$runner" --allow-output-mutation --output eDP-1 --scale 1.5 --transform 180 -- sh -c 'sleep 0.2; printf "2\\t180\\n" > "$FIDUS_FAKE_STATE"'
 [[ "$(<"$state")" == $'2\t180' ]] || { echo 'external state was overwritten' >&2; failures=$((failures + 1)); }
-rm -f "$XDG_RUNTIME_DIR/fidus-output-mutation.lock"
+rm -rf "$XDG_RUNTIME_DIR/fidus-output-mutation.lock"
 ln -s "$tmp/elsewhere" "$XDG_RUNTIME_DIR/fidus-output-mutation.lock"
 expect_rc 3 "$runner" --allow-output-mutation --output eDP-1 --scale 1.25 --transform 90 -- true
-rm -f "$XDG_RUNTIME_DIR/fidus-output-mutation.lock"
-exec 8>"$XDG_RUNTIME_DIR/fidus-output-mutation.lock"
+rm -rf "$XDG_RUNTIME_DIR/fidus-output-mutation.lock"
+mkdir "$XDG_RUNTIME_DIR/fidus-output-mutation.lock"
+exec 8<"$XDG_RUNTIME_DIR/fidus-output-mutation.lock"
 flock -n 8
 expect_rc 3 "$runner" --allow-output-mutation --output eDP-1 --scale 1.25 --transform 90 -- sh -c 'sleep 0.2'
 flock -u 8
 exec 8>&-
+rm -rf "$XDG_RUNTIME_DIR/fidus-output-mutation.lock"
 export FIDUS_FAKE_OUTPUT_MODE=malformed
 expect_rc 2 "$runner" --allow-output-mutation --output eDP-1 --scale 1.25 --transform 90 -- true
 export FIDUS_FAKE_OUTPUT_MODE=deferred
