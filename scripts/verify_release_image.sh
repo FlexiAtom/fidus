@@ -14,6 +14,12 @@ signature=${FIDUS_RELEASE_SIGNATURE:-"${manifest}.asc"}
 attestation=${FIDUS_RELEASE_ATTESTATION:-"$root/fidus-live-debian12.provenance.json"}
 attestation_signature=${FIDUS_RELEASE_ATTESTATION_SIGNATURE:-"${attestation}.asc"}
 signer_fingerprint=${FIDUS_RELEASE_SIGNER_FINGERPRINT:-}
+# Source binding is checked before any artifact is trusted.  A dirty checkout,
+# unavailable Git, or missing binding is a hard failure (never a best effort).
+python3 "$root/scripts/source_revision.py" --verify-manifest "$manifest" >/dev/null || {
+  echo "source revision binding missing, stale, or checkout is not clean" >&2
+  exit 1
+}
 [[ -f "$archive" && -f "$checksum" && -f "$manifest" && -f "$image_id_file" && -f "$sbom" ]] || {
   echo "release artifact, checksum, manifest, or image ID is missing" >&2
   exit 2
@@ -73,6 +79,10 @@ try:
         raise ValueError("archive is not a provenance subject")
     if data.get("metadata", {}).get("manifest_sha256") != hashlib.sha256(pathlib.Path(manifest).read_bytes()).hexdigest():
         raise ValueError("manifest binding mismatch")
+    manifest_data = json.loads(pathlib.Path(manifest).read_text())
+    expected_source = manifest_data.get("source", {}).get("revision_binding")
+    if not isinstance(expected_source, dict) or data.get("metadata", {}).get("source_revision_binding") != expected_source:
+        raise ValueError("source revision provenance mismatch")
     if data.get("metadata", {}).get("archive_size_bytes") != int(size) or data.get("metadata", {}).get("image_id") != image_id:
         raise ValueError("artifact metadata mismatch")
 except (OSError, ValueError, json.JSONDecodeError) as exc:

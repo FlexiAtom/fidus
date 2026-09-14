@@ -14,30 +14,36 @@ attestation_signature="${attestation}.asc"
 [[ -n "$key" ]] || { echo 'set FIDUS_RELEASE_SIGNING_KEY to a GPG key fingerprint or email' >&2; exit 2; }
 for tool in gpg sha256sum stat python3; do command -v "$tool" >/dev/null || { echo "$tool is required" >&2; exit 2; }; done
 [[ -f "$archive" && -f "$manifest" ]] || { echo 'archive or manifest is missing' >&2; exit 2; }
+# Refuse provenance from a dirty checkout: the binding must describe exactly the
+# source used by the build, not a later or fabricated claim.
+source_binding=$(python3 "$root/scripts/source_revision.py" --json)
 archive_sha256=$(sha256sum "$archive" | awk '{print $1}')
 archive_size=$(stat -c '%s' "$archive")
 key_fingerprint=$(gpg --batch --with-colons --list-keys "$key" | awk -F: '$1 == "fpr" {print $10; exit}')
 [[ "$key_fingerprint" =~ ^[0-9A-Fa-f]{40}$ ]] || { echo 'signing key must resolve to an OpenPGP fingerprint' >&2; exit 2; }
 # Keep the manifest's provenance pointers explicit, then sign that exact byte sequence.
-python3 - "$manifest" "$signature" "$attestation" "$key_fingerprint" <<'PY'
+python3 - "$manifest" "$signature" "$attestation" "$key_fingerprint" "$source_binding" <<'PY'
 import json, pathlib, sys
 p = pathlib.Path(sys.argv[1]); data = json.loads(p.read_text())
 prov = data.setdefault("provenance", {})
 prov.update({"signature": pathlib.Path(sys.argv[2]).name,
              "attestation": pathlib.Path(sys.argv[3]).name,
              "signer_fingerprint": sys.argv[4]})
-p.write_text(json.dumps(data, indent=2) + "\n")
+binding = json.loads(sys.argv[5])
+data.setdefault("source", {})["revision_binding"] = binding
+# Canonical JSON keeps the signed bytes deterministic and prevents stale fields.
+p.write_text(json.dumps(data, indent=2, sort_keys=False) + "\n")
 PY
 manifest_sha256=$(sha256sum "$manifest" | awk '{print $1}')
-python3 - "$attestation" "$archive" "$archive_sha256" "$archive_size" "$manifest_sha256" "$key_fingerprint" "$manifest" <<'PY'
+python3 - "$attestation" "$archive" "$archive_sha256" "$archive_size" "$manifest_sha256" "$key_fingerprint" "$manifest" "$source_binding" <<'PY'
 import json, pathlib, sys
-out, archive, digest, size, manifest, fingerprint, manifest_path = sys.argv[1:]
+out, archive, digest, size, manifest, fingerprint, manifest_path, source_binding = sys.argv[1:]
 data = {
   "schema_version": 1,
   "predicate_type": "https://slsa.dev/provenance/v1",
   "subject": [{"name": pathlib.Path(archive).name, "digest": {"sha256": digest}}],
   "predicate": {"buildDefinition": {"buildType": "https://github.com/flexiatom/fidus/release"}},
-  "metadata": {"manifest_sha256": manifest, "archive_size_bytes": int(size), "image_id": json.loads(pathlib.Path(manifest_path).read_text())["image"]["image_id"], "signer_fingerprint": fingerprint}
+  "metadata": {"manifest_sha256": manifest, "archive_size_bytes": int(size), "image_id": json.loads(pathlib.Path(manifest_path).read_text())["image"]["image_id"], "signer_fingerprint": fingerprint, "source_revision_binding": json.loads(source_binding)}
 }
 pathlib.Path(out).write_text(json.dumps(data, indent=2) + "\n")
 PY

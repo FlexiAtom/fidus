@@ -25,6 +25,9 @@ not access the network.
 - detached OpenPGP signature: `fidus-live-debian12.manifest.json.asc`
 - SLSA v1 provenance attestation: `fidus-live-debian12.provenance.json` and detached signature `.asc`
 - signer identity: the manifest `provenance.signer_fingerprint` field (verification can pin it with `FIDUS_RELEASE_SIGNER_FINGERPRINT`)
+- source binding: `source.revision_binding` records the exact Git `HEAD` and a normalized tracked-source digest. The digest algorithm is `sha256(path\\0blob-sha256\\0)` over sorted tracked paths, excluding only release outputs rewritten by signing.
+
+`sign_release.sh` refuses a dirty or untracked source checkout and writes this binding into the manifest and provenance before signing. `verify_release_image.sh` recomputes it and fails closed before trusting the artifact. Therefore this repository's existing manifest/archive cannot be retroactively claimed to be bound: it must be rebuilt and signed from a clean checkout. If Docker or image reconstruction is unavailable, verification must stop at this binding/signature/metadata gate; no image identity or reproducibility claim may be inferred.
 
 The repository does not contain a private signing key. A release operator must create
 these files locally with `scripts/sign_release.sh`; never replace them with a
