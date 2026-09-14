@@ -39,6 +39,19 @@ fn layer_shell_present_means_crosshair_available() {
 }
 
 #[test]
+fn unsupported_input_region_is_reported_before_crosshair() {
+    let env = EnvironmentContext { wayland_input_region_supported: false, ..niri_env() };
+    let gate = ProbeGate::from_environment(env);
+    assert!(matches!(
+        gate.query_calibrator_availability(CalibrationMethod::Crosshair),
+        CalibrationStatus::NotSupported {
+            reason: UnsupportedReason::MissingPrimitive { primitive: "click-through input region" },
+            ..
+        }
+    ));
+}
+
+#[test]
 fn missing_layer_shell_is_reported_with_the_protocol_name() {
     let env = EnvironmentContext { has_layer_shell: false, ..niri_env() };
     let gate = ProbeGate::from_environment(env);

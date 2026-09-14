@@ -144,6 +144,46 @@ impl CrosshairCalibrator {
     pub fn with_defaults() -> Self {
         Self::new(CrosshairConfig::default())
     }
+
+    fn validate_config(cfg: &CrosshairConfig) -> Result<(), CalibrationError> {
+        let finite_nonnegative = |name: &str, value: f64| {
+            if value.is_finite() && value >= 0.0 {
+                Ok(())
+            } else {
+                Err(CalibrationError::InvalidConfiguration(format!(
+                    "{name} must be finite and non-negative"
+                )))
+            }
+        };
+        for (name, value) in [
+            ("jitter_px", cfg.jitter_px),
+            ("edge_padding", cfg.edge_padding),
+            ("residual_tolerance_px", cfg.residual_tolerance_px),
+            ("verification_tolerance_px", cfg.verification_tolerance_px),
+            ("consistency_tolerance_px", cfg.consistency_tolerance_px),
+            ("corroboration_tolerance_px", cfg.corroboration_tolerance_px),
+        ] {
+            finite_nonnegative(name, value)?;
+        }
+        if !cfg.scale_range.0.is_finite() || !cfg.scale_range.1.is_finite()
+            || cfg.scale_range.0 <= 0.0 || cfg.scale_range.0 > cfg.scale_range.1
+            || cfg.primary_positions == 0 || cfg.verification_positions == 0 || cfg.passes == 0
+            || cfg.retries == 0 || cfg.corroborations == 0
+        {
+            return Err(CalibrationError::InvalidConfiguration("invalid scale range or zero calibration count".into()));
+        }
+        let attempts = cfg.retries.checked_add(cfg.corroborations)
+            .ok_or_else(|| CalibrationError::InvalidConfiguration("retry count overflow".into()))?;
+        let positions = cfg.primary_positions.checked_add(cfg.verification_positions)
+            .ok_or_else(|| CalibrationError::InvalidConfiguration("position count overflow".into()))?;
+        let work = cfg.passes.checked_mul(positions)
+            .and_then(|n| n.checked_mul(attempts))
+            .ok_or_else(|| CalibrationError::InvalidConfiguration("calibration work budget overflow".into()))?;
+        if work > 1_000_000 {
+            return Err(CalibrationError::InvalidConfiguration("calibration work budget is too large".into()));
+        }
+        Ok(())
+    }
 }
 
 impl Calibrator for CrosshairCalibrator {
@@ -161,15 +201,19 @@ impl Calibrator for CrosshairCalibrator {
         self.chosen_style = None;
         let result = self.run(io);
         // Spec §4.4: the overlay is destroyed on every exit path — errors
-        // included. `destroy_projector` is idempotent.
-        let _ = io.destroy_projector();
-        result
+        // included. A successful solve is not reportable when teardown fails.
+        let teardown = io.destroy_projector();
+        match (result, teardown) {
+            (Ok(_), Err(error)) => Err(error.into()),
+            (result, _) => result,
+        }
     }
 }
 
 impl CrosshairCalibrator {
     fn run(&mut self, io: &mut dyn CalibrationIo) -> Result<CoordinateFrame, CalibrationError> {
         let cfg = self.config.clone();
+        Self::validate_config(&cfg)?;
         let (uw, uh) = io.usable_size_hint()?;
         let marker = cfg.style.size_logical;
 
@@ -186,9 +230,30 @@ impl CrosshairCalibrator {
             None => Rng::seed_from_clock(0xB9_u64.rotate_left(32) ^ marker.to_bits()),
         };
 
-        let mut pass_maps: Vec<SolvedMap> = Vec::with_capacity(cfg.passes);
-        let mut last_quality: Option<(CalibrationQuality, (u32, u32))> = None;
+        if cfg.passes == 0 {
+            return Err(CalibrationError::AccuracyBelowThreshold {
+                measured: 0.0,
+                tolerance: 0.0,
+                stage: "passes must be greater than zero",
+            });
+        }
+        if cfg.primary_positions < 3 {
+            return Err(CalibrationError::AccuracyBelowThreshold {
+                measured: cfg.primary_positions as f64,
+                tolerance: 3.0,
+                stage: "at least three primary positions are required",
+            });
+        }
+        if cfg.verification_positions == 0 {
+            return Err(CalibrationError::AccuracyBelowThreshold {
+                measured: 0.0,
+                tolerance: 0.0,
+                stage: "verification requires at least one position",
+            });
+        }
 
+        let mut pass_results: Vec<(SolvedMap, CalibrationQuality, (u32, u32))> =
+            Vec::with_capacity(cfg.passes);
         for _ in 0..cfg.passes {
             let mut rng_pass = rng.clone();
             // Bug fix: advance the *shared* generator, not the throwaway
@@ -197,16 +262,18 @@ impl CrosshairCalibrator {
             // state and sampled IDENTICAL positions — the "independent
             // passes" were not independent.
             rng.next_u64();
-            let map = self.calibrate_pass(io, &mut rng_pass, uw, uh)?;
-            pass_maps.push(map.0);
-            last_quality = Some((map.1, map.2));
+            pass_results.push(self.calibrate_pass(io, &mut rng_pass, uw, uh)?);
         }
 
-        // Independent passes must agree across the whole usable area.
+        // Every independent pass participates in the decision; comparing only
+        // the first and last lets a bad middle pass be silently accepted.
         let probes = corner_probes(uw, uh);
-        let consistency = pass_maps[0]
-            .map()
-            .max_difference(&pass_maps[cfg.passes - 1].map(), &probes);
+        let reference = &pass_results[0].0;
+        let consistency = pass_results
+            .iter()
+            .skip(1)
+            .map(|result| reference.map().max_difference(&result.0.map(), &probes))
+            .fold(0.0, f64::max);
         if consistency > cfg.consistency_tolerance_px {
             return Err(CalibrationError::Inconsistent {
                 detail: format!(
@@ -216,9 +283,10 @@ impl CrosshairCalibrator {
             });
         }
 
-        let map = pass_maps.remove(0);
-        let (quality, capture_size) = last_quality.expect("at least one pass ran");
-        let quality = CalibrationQuality { consistency_max_err_px: consistency, ..quality };
+        // Keep map and quality from the same pass; selecting the map from one
+        // pass and the quality from another can report a misleading result.
+        let (map, mut quality, capture_size) = pass_results.remove(0);
+        quality.consistency_max_err_px = consistency;
 
         CoordinateFrame::new(
             map,
@@ -252,6 +320,21 @@ impl CrosshairCalibrator {
             .into_iter()
             .map(|p| LogicalPoint::new(p.x.round(), p.y.round()))
             .collect();
+        let required = cfg
+            .primary_positions
+            .checked_add(cfg.verification_positions)
+            .ok_or(CalibrationError::AccuracyBelowThreshold {
+                measured: f64::INFINITY,
+                tolerance: 0.0,
+                stage: "sample count overflow",
+            })?;
+        if positions.len() < required {
+            return Err(CalibrationError::AccuracyBelowThreshold {
+                measured: positions.len() as f64,
+                tolerance: required as f64,
+                stage: "insufficient primary or verification positions",
+            });
+        }
         let mut correspondences: Vec<(LogicalPoint, PhysicalPoint)> = Vec::new();
         let mut expected_area: Option<f64> = None;
         let mut capture_size = (0u32, 0u32);
@@ -332,7 +415,9 @@ impl CrosshairCalibrator {
         // it. See `CrosshairConfig::corroborations`.
         let mut agreed: Vec<Measurement> = Vec::new();
 
-        for _ in 0..cfg.retries + cfg.corroborations {
+        let attempts = cfg.retries.checked_add(cfg.corroborations)
+            .ok_or_else(|| CalibrationError::InvalidConfiguration("retry count overflow".into()))?;
+        for _ in 0..attempts {
             let baseline = io.capture()?;
             // Colour is chosen once per pass, not per attempt: scanning the
             // frame is O(pixels) and the screen does not change character

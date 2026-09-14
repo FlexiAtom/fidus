@@ -130,7 +130,25 @@ impl MotionGate {
         // Non-finite input is not a measurement. Refusing (as "dynamic")
         // rather than clamping keeps it out of the baseline entirely —
         // project convention 4: a guard must reject, not fabricate.
-        let ratio = if ratio.is_finite() { ratio.clamp(0.0, 1.0) } else { 1.0 };
+        if !ratio.is_finite() {
+            // Invalid measurements must be refused even inside the coalescing
+            // window; replaying a prior passing verdict would admit NaN/Inf.
+            self.last_accounted = Some(now);
+            self.static_streak = 0;
+            self.dynamic_streak = self.dynamic_streak.saturating_add(1);
+            self.armed = false;
+            let verdict = GateVerdict {
+                // Keep GateVerdict's documented [0, 1] output contract while
+                // refusing the invalid input as maximally dynamic.
+                changed_ratio: 1.0,
+                passed: false,
+                dynamic: true,
+                coalesced: false,
+            };
+            self.last_verdict = Some(verdict);
+            return verdict;
+        }
+        let ratio = ratio.clamp(0.0, 1.0);
 
         if let (Some(t), Some(prev)) = (self.last_accounted, self.last_verdict) {
             if now.duration_since(t) < self.window {
@@ -305,8 +323,10 @@ mod tests {
     fn non_finite_input_is_refused_not_absorbed() {
         let mut gate = MotionGate::default();
         let t0 = Instant::now();
-        let v = gate.observe(f64::NAN, t0);
-        assert!(v.dynamic && !v.passed, "NaN must not be treated as a quiet measurement");
-        assert_eq!(gate.baseline(), 0.0, "NaN must not poison the baseline");
+        for (name, ratio) in [("NaN", f64::NAN), ("+Inf", f64::INFINITY), ("-Inf", f64::NEG_INFINITY)] {
+            let v = gate.observe(ratio, t0 + tick(if name == "NaN" { 0 } else if name == "+Inf" { 1 } else { 2 }));
+            assert!(v.dynamic && !v.passed, "{name} must not be treated as a quiet measurement");
+            assert_eq!(gate.baseline(), 0.0, "{name} must not poison the baseline");
+        }
     }
 }

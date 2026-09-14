@@ -531,7 +531,7 @@ fidus-extras     🚧 // 业务特定项：L3 Beacon / L5 TUIScan——移出核
 ## 8. P4 测试子项目方案：`fidus-test`
 
 > 来源：[`docs/proposals/P4-fidus-test-subproject.md`](proposals/P4-fidus-test-subproject.md) 与 [`docs/drafts/P4-fidus-test.md`](drafts/P4-fidus-test.md)。
-> 状态：**P4 已实现并完成发布收口**。CI 协议核心、live-host 协议桥接、本机 live-container 实测、Debian 12 runtime Release 归档和自动验证脚本均已完成；跨机器复现以基础镜像 digest、归档 SHA-256 和 image ID 为边界。本节仍不把容器宣称为显示隔离。
+> 状态：**P4 历史快照：本机实现与候选 Release 资产已完成；当前正式发布未收口**。CI 协议核心、live-host 协议桥接、本机 live-container 实测、Debian 12 runtime 归档和自动验证脚本在该快照中已完成；跨机器复现与当前 clean source binding 仍未完成。本节仍不把容器宣称为显示隔离。
 
 ### 8.1 目标与边界
 
@@ -683,6 +683,51 @@ P5 当前保守退出码真值表如下；恢复未被稳定身份或 read-back 
 
 ---
 
+## 8.8 核心库完全体收口与边界硬化方案
+
+> 本节是由 `docs/drafts/complete-state-hardening.md` 转入的方案约束。它定义收口目标和验收边界，不表示下列代码工作已经完成；实现必须按工作包逐项提交证据，真实桌面 mutation、破坏性实验、跨机器验证和发布仍需单独授权。
+
+### 8.8.1 范围裁决
+
+核心收口只覆盖现有 L0 Anchor、L1 Fingerprint、L4 Relative、L7 Fusion、L8 EdgeSync、L9 Crosshair，以及支撑它们的 Wayland/P5 测试边界。L6 继续并入 L1；L2 不恢复为独立全局指针层；L3 Beacon、L5 TUIScan 继续移出核心；L10 GradientField 维持否决；L2.5 PointerProbe 维持删除。
+
+“完全体”在本项目中的含义是：已支持的投射 + 截屏抽象上，不存在已知由公开输入触发的 panic、NaN 传播或 Critical/High 级静默错误；这不等于所有 compositor、所有平台或所有异常桌面证据已经完成。
+
+### 8.8.2 工作包与强制约束
+
+1. **Fused 置信度边界**：L1 的 raw quality 与可接受 confidence ceiling 必须分离表示；L7/Kalman 只能接收应用 ceiling 后的值。默认不可定位模板必须拒绝，opt-in 只能降权。只有周期/渐变回归仍能穿透时，才另立 innovation/motion gate 方案。
+2. **输入与数值边界**：所有公开 affine/correspondence、Frame、stride/data、尺寸乘法、BoundingBox、ROI、图像尺寸、MotionGate 和 Anchor 配置必须拒绝非有限、溢出、空/不足数据、负区间和 `passes=0` 等退化输入；不得用 epsilon、clamp 或默认值伪造合法测量。
+3. **Anchor 几何与多轮**：验证一般 affine 的真实不变量，不以对角线等长作为通用条件；所有 pass 必须参与一致性判决；map、quality、验证点必须来自同一有效结果或明确聚合；验证点不足必须失败。
+4. **Wayland buffer 生命周期**：screencopy 与 marker buffer 只有在收到 compositor `release` 后才可复用；`ready` 只表示内容可读；session 必须区分 ready、failed、released、destroyed，并覆盖延迟 release 和快速复用。
+5. **P5 runner 安全**：无法证明 escaped session 清理时不得报告 confirmed；partial apply 必须记录已成功 setter；restore 前后外部变化和 TOCTOU 默认保守拒绝覆盖；lock 清理失败必须升级结果；runtime mount 使用 allowlist/结构化参数；各阶段信号进入不可重入恢复；wrapper 输出失败不得静默吞掉。
+6. **协议与 wrapper**：summary status、业务状态和 counts 必须一致；child 为 0 但 summary 为 failed/harness_error 时必须非零；malformed public record 必须返回错误；broken pipe 必须有明确 harness error；wrapper 必须有真实 integration test。
+7. **文档与发布**：历史段落必须标注快照；F42 必须区分 fixture/protocol pass 与真实观察；审查记录绑定明确 revision；release manifest、SBOM、provenance、签名必须来自同一 clean source revision，并保持 fail-closed。
+
+### 8.8.3 执行顺序与验收
+
+```text
+WP-A Fused 置信度
+→ WP-B 输入/数值边界
+→ WP-C Anchor 几何
+→ WP-D Wayland 生命周期
+→ WP-E P5 runner
+→ WP-F wrapper 协议
+→ WP-G 文档/发布
+→ 全量审查
+```
+
+每个工作包完成时必须同时提交：代码入口和调用链、失效模式说明、无显示回归、失败/回滚边界、实际命令及结果。工作包之间不得用 fake 证据替代真实 compositor 或跨机器证据。
+
+### 8.8.4 当前验收与授权边界
+
+- 无显示矩阵仍按 F1–F42 单项统计；`real-pending` 不得改写为 `pass`。
+- 真实 Niri 正常路径只能证明本机观察；当前 NameOnly 身份不能产生 `recovery=confirmed`。
+- 真实 compositor 异常、SIGKILL、compositor restart、跨 compositor 和跨机器发布验证均为独立证据，不由本方案自动授权。
+- push、正式发布、真实桌面 mutation 和破坏性实验仍需调用方明确请求。
+- 方案完成定义是：工作包证据齐全、全量门禁通过、文档与 release 时间线一致；不是“所有候选功能都实现”。
+
+---
+
 ## 9. 实施优先级（P0 → P5）
 
 | 阶段 | 内容 | 说明 |
@@ -721,7 +766,7 @@ P5 当前保守退出码真值表如下；恢复未被稳定身份或 read-back 
 3b. ~~**分数缩放下的稳健性**~~ — **已解决，且成因与缩放无关**：真正的成因是真实桌面上别的窗口自发重绘，破坏了差分检测"标记是唯一变化"的隐含前提。已由 §4.1「检测的三重判据」修复，实机 A/B：修复前 12/12 失败，修复后 0/30。分数缩放本身只带来 0.2–0.3px 的无害残差。
 4. 多显示器/混合 DPI 下 `CoordinateFrame` 的表示与热插拔处理？ — **部分有策略**：Gate 在 `multi_monitor_count > 1` 时返回 `Degraded`（置信度 0.75/0.65），属"诚实降级"而非解决；表示与热插拔仍未定
 5. 权限状态机在各平台的精确行为（尤其 macOS 重启需求）？ — **状态机已落地**（`PermissionState` 五态已参与 Gate 判决，含 `RequiresRestart`），但 **macOS 实机行为仍未验证**
-6. P5 真实 host adapter、Niri parser adapter、signal supervisor 和异常恢复？ — **未实现**；当前只有 test-only fixture、fake 模型和本机正常路径实验，NameOnly 身份不得报告 `recovery=confirmed`
+6. P5 真实 host adapter、Niri parser adapter、signal supervisor 和异常恢复？ — **部分实现**；当前已有受控 runner、parser、signal/进程组监督、锁与恢复的无显示 fake 回归及本机正常路径实验，但真实 compositor 异常注入、稳定 identity 和跨机器验证仍未完成；NameOnly 身份不得报告 `recovery=confirmed`
 
 > 第 2、3 条是真空白；3b 已定位成因待修；第 4、5、6 条已有诚实的降级/占位，但都**不等于已解决**。
 

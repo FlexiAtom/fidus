@@ -140,9 +140,14 @@ pub fn parse_result_line(line: &str) -> Result<Option<ResultRecord>, ParseError>
         {
             return Err(ParseError::InvalidKey(key.to_owned()));
         }
-        if value.is_empty() || fields.insert(key.to_owned(), value.to_owned()).is_some() {
-            return Err(if value.is_empty() {
-                ParseError::InvalidValue(format!("empty value for {key}"))
+        let invalid_value = value.is_empty()
+            || !value.bytes().all(|b| {
+                b.is_ascii() && !b.is_ascii_control() && !b.is_ascii_whitespace() && b != b'='
+            });
+        let duplicate = fields.insert(key.to_owned(), value.to_owned()).is_some();
+        if invalid_value || duplicate {
+            return Err(if invalid_value {
+                ParseError::InvalidValue(format!("invalid value for {key}"))
             } else {
                 ParseError::DuplicateKey(key.to_owned())
             });
@@ -270,10 +275,14 @@ pub fn summary_for(records: &[ResultRecord]) -> Result<ResultRecord, ParseError>
         ));
     }
     let first = &records[0];
+    let first_mode = first
+        .fields
+        .get("execution_mode")
+        .ok_or(ParseError::MissingField("execution_mode"))?;
     if records.iter().any(|record| {
         record.kind == "summary"
             || record.run_id != first.run_id
-            || record.fields["execution_mode"] != first.fields["execution_mode"]
+            || record.fields.get("execution_mode") != Some(first_mode)
     }) {
         return Err(ParseError::InconsistentRun(
             "invalid business records".into(),
@@ -330,16 +339,19 @@ pub fn validate_run_for<'a>(
     if records.last().map(|record| record.kind.as_str()) != Some("summary") {
         return Err(ParseError::SummaryNotLast);
     }
+    let first_mode = first
+        .fields
+        .get("execution_mode")
+        .ok_or(ParseError::MissingField("execution_mode"))?;
     if records.iter().any(|r| {
-        r.run_id != first.run_id || r.fields["execution_mode"] != first.fields["execution_mode"]
+        r.run_id != first.run_id || r.fields.get("execution_mode") != Some(first_mode)
     }) {
         return Err(ParseError::InconsistentRun(
             "run_id or execution_mode differs".into(),
         ));
     }
     if expected_run_id.is_some_and(|expected| first.run_id != expected)
-        || expected_execution_mode
-            .is_some_and(|expected| first.fields["execution_mode"] != expected)
+        || expected_execution_mode.is_some_and(|expected| first_mode != expected)
     {
         return Err(ParseError::InconsistentRun(
             "run does not match wrapper correlation".into(),
@@ -355,7 +367,10 @@ pub fn validate_run_for<'a>(
             "run has no business records".into(),
         ));
     }
-    if total != observed_total || ok + failed != total {
+    let counted_total = ok.checked_add(failed).ok_or_else(|| {
+        ParseError::InvalidValue("summary counts overflow".into())
+    })?;
+    if total != observed_total || counted_total != total {
         return Err(ParseError::InconsistentRun(
             "summary counts do not match stream".into(),
         ));
@@ -377,11 +392,20 @@ pub fn validate_run_for<'a>(
             "summary status counts do not match records".into(),
         ));
     }
+    let expected_status = if failed == 0 { "ok" } else { "failed" };
+    if summary.status != expected_status {
+        return Err(ParseError::InconsistentRun(
+            "summary status does not match records".into(),
+        ));
+    }
     Ok(summary)
 }
 
 fn parse_count(record: &ResultRecord, key: &'static str) -> Result<usize, ParseError> {
-    record.fields[key]
+    record
+        .fields
+        .get(key)
+        .ok_or(ParseError::MissingField(key))?
         .parse::<usize>()
         .map_err(|_| ParseError::InvalidValue(format!("{key} must be an integer")))
 }
@@ -511,6 +535,49 @@ mod tests {
         assert!(matches!(
             validate_run(&[record]),
             Err(ParseError::MissingSummary)
+        ));
+    }
+
+    #[test]
+    fn rejects_non_ascii_or_embedded_equals_values() {
+        assert!(matches!(
+            parse_result_line("FIDUS_RESULT version=1 kind=environment run_id=r status=ready execution_mode=ci backend=é compositor=niri output=eDP-1 scale=1 transform=normal"),
+            Err(ParseError::InvalidValue(_))
+        ));
+        assert!(matches!(
+            parse_result_line("FIDUS_RESULT version=1 kind=environment run_id=r status=ready execution_mode=ci backend=wayland compositor=niri output=eDP-1=bad scale=1 transform=normal"),
+            Err(ParseError::InvalidValue(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_summary_status_that_disagrees_with_records() {
+        let business = parse_result_line(&line(
+            "environment",
+            "backend=none compositor=none output=none scale=1 transform=normal",
+        ))
+        .unwrap()
+        .unwrap();
+        let mut summary = summary_for(std::slice::from_ref(&business)).unwrap();
+        summary.status = "failed".into();
+        summary.fields.insert("status".into(), "failed".into());
+        assert!(matches!(
+            validate_run(&[business, summary]),
+            Err(ParseError::InconsistentRun(_))
+        ));
+    }
+
+    #[test]
+    fn malformed_public_record_returns_error_instead_of_panicking() {
+        let record = ResultRecord {
+            kind: "environment".into(),
+            status: "ready".into(),
+            run_id: "r".into(),
+            fields: BTreeMap::new(),
+        };
+        assert!(matches!(
+            summary_for(std::slice::from_ref(&record)),
+            Err(ParseError::MissingField("execution_mode"))
         ));
     }
 

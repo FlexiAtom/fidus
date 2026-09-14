@@ -17,18 +17,38 @@ use crate::io::Frame;
 /// plain pixel buffer outside the capture [`Frame`] strides).
 #[derive(Clone, Debug, PartialEq)]
 pub struct RgbaImage {
-    /// Width in pixels.
-    pub width: u32,
-    /// Height in pixels.
-    pub height: u32,
-    /// Pixel bytes, `width * height * 4` long.
-    pub data: Vec<u8>,
+    width: u32,
+    height: u32,
+    data: Vec<u8>,
 }
 
 impl RgbaImage {
+    /// Width in pixels.
+    pub fn width(&self) -> u32 { self.width }
+
+    /// Height in pixels.
+    pub fn height(&self) -> u32 { self.height }
+
+    /// Number of stored pixel bytes.
+    pub fn byte_len(&self) -> usize { self.data.len() }
+
+    /// Reports whether dimensions and storage describe one tightly-packed RGBA image.
+    pub fn is_valid(&self) -> bool {
+        (self.width as usize)
+            .checked_mul(self.height as usize)
+            .and_then(|n| n.checked_mul(4))
+            .is_some_and(|expected| expected == self.data.len() && self.width != 0 && self.height != 0)
+    }
+
     /// Creates an image from raw tightly-packed bytes.
     pub fn from_raw(width: u32, height: u32, data: Vec<u8>) -> Self {
-        assert_eq!(data.len(), width as usize * height as usize * 4);
+        // Keep this constructor total for public/untrusted image input. An
+        // invalid buffer has no pixels; accessors and matchers then reject it
+        // instead of panicking on a forged length or overflowing arithmetic.
+        let expected = (width as usize).checked_mul(height as usize).and_then(|n| n.checked_mul(4));
+        if expected != Some(data.len()) {
+            return RgbaImage { width: 0, height: 0, data: Vec::new() };
+        }
         RgbaImage { width, height, data }
     }
 
@@ -37,8 +57,16 @@ impl RgbaImage {
         if x >= self.width || y >= self.height {
             return [0, 0, 0, 0];
         }
-        let i = (y * self.width + x) as usize * 4;
-        [self.data[i], self.data[i + 1], self.data[i + 2], self.data[i + 3]]
+        let i = (y as usize)
+            .checked_mul(self.width as usize)
+            .and_then(|n| n.checked_add(x as usize))
+            .and_then(|n| n.checked_mul(4));
+        match i {
+            Some(i) if i.checked_add(4).is_some_and(|end| end <= self.data.len()) => {
+                [self.data[i], self.data[i + 1], self.data[i + 2], self.data[i + 3]]
+            }
+            _ => [0, 0, 0, 0],
+        }
     }
 
     /// Rec.709 luma of a pixel, in `[0, 255]`.
@@ -50,7 +78,15 @@ impl RgbaImage {
     /// Copies a [`Frame`] (arbitrary stride/format) into a tightly-packed
     /// image.
     pub fn from_frame(frame: &Frame) -> Self {
-        let mut data = Vec::with_capacity(frame.width as usize * frame.height as usize * 4);
+        if !frame.is_valid() {
+            return RgbaImage { width: 0, height: 0, data: Vec::new() };
+        }
+        let Some(capacity) = (frame.width as usize)
+            .checked_mul(frame.height as usize)
+            .and_then(|n| n.checked_mul(4)) else {
+            return RgbaImage { width: 0, height: 0, data: Vec::new() };
+        };
+        let mut data = Vec::with_capacity(capacity);
         for y in 0..frame.height {
             for x in 0..frame.width {
                 data.extend_from_slice(&frame.rgba_at(x, y));
@@ -61,10 +97,20 @@ impl RgbaImage {
 
     /// Bilinear resample to a new pixel size.
     pub fn resample(&self, new_width: u32, new_height: u32) -> Self {
-        if new_width == 0 || new_height == 0 {
-            return RgbaImage { width: new_width, height: new_height, data: Vec::new() };
+        let Some(source_len) = (self.width as usize)
+            .checked_mul(self.height as usize)
+            .and_then(|n| n.checked_mul(4)) else {
+            return RgbaImage { width: 0, height: 0, data: Vec::new() };
+        };
+        if new_width == 0 || new_height == 0 || self.width == 0 || self.height == 0 || self.data.len() != source_len {
+            return RgbaImage { width: 0, height: 0, data: Vec::new() };
         }
-        let mut out = vec![0u8; new_width as usize * new_height as usize * 4];
+        let Some(out_len) = (new_width as usize)
+            .checked_mul(new_height as usize)
+            .and_then(|n| n.checked_mul(4)) else {
+            return RgbaImage { width: 0, height: 0, data: Vec::new() };
+        };
+        let mut out = vec![0u8; out_len];
         let sx = self.width as f32 / new_width as f32;
         let sy = self.height as f32 / new_height as f32;
         for y in 0..new_height {
@@ -86,7 +132,14 @@ impl RgbaImage {
                         + p01 * wx * (1.0 - wy)
                         + p10 * (1.0 - wx) * wy
                         + p11 * wx * wy;
-                    out[(y * new_width + x) as usize * 4 + c] = v.round().clamp(0.0, 255.0) as u8;
+                    let Some(pixel) = (y as usize)
+                        .checked_mul(new_width as usize)
+                        .and_then(|n| n.checked_add(x as usize))
+                        .and_then(|n| n.checked_mul(4))
+                        .and_then(|n| n.checked_add(c)) else {
+                        return RgbaImage { width: 0, height: 0, data: Vec::new() };
+                    };
+                    out[pixel] = v.round().clamp(0.0, 255.0) as u8;
                 }
             }
         }
@@ -185,5 +238,17 @@ impl TargetDescription {
     pub fn tracking_ambiguous_appearance(mut self) -> Self {
         self.untrackable_policy = UntrackablePolicy::TrackWithReducedConfidence;
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RgbaImage;
+
+    #[test]
+    fn malformed_raw_image_is_empty_instead_of_panicking() {
+        let image = RgbaImage::from_raw(u32::MAX, 2, vec![1, 2, 3]);
+        assert_eq!((image.width(), image.height()), (0, 0));
+        assert!(!image.is_valid());
     }
 }

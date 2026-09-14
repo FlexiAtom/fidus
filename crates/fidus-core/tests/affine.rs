@@ -1,7 +1,7 @@
 // Copyright 2026 Flexiatom
 // SPDX-License-Identifier: Apache-2.0
 
-use fidus_core::coord::{AffineTransform, LogicalPoint, PhysicalPoint, SolveError};
+use fidus_core::coord::{AffineTransform, BoundingBox, LogicalPoint, PhysicalPoint, SolveError};
 use fidus_core::frame::{CalibrationQuality, CoordinateFrame};
 
 fn corr_list(t: AffineTransform) -> Vec<(LogicalPoint, PhysicalPoint)> {
@@ -41,7 +41,11 @@ fn identity_recovers_exactly() {
     // screen-sized coordinates; bit-exact recovery is not a property of any
     // floating-point solver. 1e-9 still pins correctness six orders below
     // the 1 px calibration budget.
-    for (got, want) in t.coefficients().into_iter().zip([1.0, 0.0, 0.0, 0.0, 1.0, 0.0]) {
+    for (got, want) in t
+        .coefficients()
+        .into_iter()
+        .zip([1.0, 0.0, 0.0, 0.0, 1.0, 0.0])
+    {
         assert!((got - want).abs() < 1e-9, "coefficient {got} vs {want}");
     }
     assert!(res.rms < 1e-9, "rms {}", res.rms);
@@ -125,8 +129,14 @@ fn degenerate_and_singular_inputs_rejected() {
     // Three collinear points.
     let collinear = [
         (LogicalPoint::new(0.0, 0.0), PhysicalPoint::new(0.0, 0.0)),
-        (LogicalPoint::new(10.0, 10.0), PhysicalPoint::new(10.0, 10.0)),
-        (LogicalPoint::new(20.0, 20.0), PhysicalPoint::new(20.0, 20.0)),
+        (
+            LogicalPoint::new(10.0, 10.0),
+            PhysicalPoint::new(10.0, 10.0),
+        ),
+        (
+            LogicalPoint::new(20.0, 20.0),
+            PhysicalPoint::new(20.0, 20.0),
+        ),
     ];
     assert!(matches!(
         AffineTransform::from_correspondences(&collinear).map(|s| s.map()),
@@ -135,12 +145,55 @@ fn degenerate_and_singular_inputs_rejected() {
 }
 
 #[test]
+fn non_finite_correspondences_are_rejected_without_nan_results() {
+    let base = corr_list(AffineTransform::IDENTITY);
+    for index in 0..4 {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut corr = base.clone();
+            match index {
+                0 => corr[0].0.x = value,
+                1 => corr[0].0.y = value,
+                2 => corr[0].1.x = value,
+                _ => corr[0].1.y = value,
+            }
+            assert_eq!(
+                AffineTransform::from_correspondences(&corr),
+                Err(SolveError::NonFinite),
+                "field {index}, value {value:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn finite_but_overflowing_fit_is_rejected() {
+    let corr = [
+        (LogicalPoint::new(0.0, 0.0), PhysicalPoint::new(0.0, 0.0)),
+        (
+            LogicalPoint::new(f64::MAX, 0.0),
+            PhysicalPoint::new(1.0, 0.0),
+        ),
+        (
+            LogicalPoint::new(0.0, f64::MAX),
+            PhysicalPoint::new(0.0, 1.0),
+        ),
+    ];
+    assert_eq!(
+        AffineTransform::from_correspondences(&corr),
+        Err(SolveError::NonFinite)
+    );
+}
+
+#[test]
 fn inverse_roundtrips() {
     let t = AffineTransform::from_correspondences(&corr_from(1.25, 7.0, 1.25, 40.0))
         .unwrap()
         .map();
     let inv = t.inverse().unwrap();
-    for p in [LogicalPoint::new(0.0, 0.0), LogicalPoint::new(1919.0, 1079.0)] {
+    for p in [
+        LogicalPoint::new(0.0, 0.0),
+        LogicalPoint::new(1919.0, 1079.0),
+    ] {
         let back = inv.apply_physical(t.apply(p));
         assert!((back.x - p.x).abs() < 1e-9);
         assert!((back.y - p.y).abs() < 1e-9);
@@ -194,11 +247,26 @@ fn coordinate_frame_converts_both_ways() {
 
     let p = LogicalPoint::new(100.0, 50.0);
     let phys = frame.logical_to_physical(p);
-    assert!((phys.x - 200.0).abs() < 1e-9 && (phys.y - 180.0).abs() < 1e-9, "{phys:?}");
+    assert!(
+        (phys.x - 200.0).abs() < 1e-9 && (phys.y - 180.0).abs() < 1e-9,
+        "{phys:?}"
+    );
     let back = frame.physical_to_logical(phys);
     assert!((back.x - 100.0).abs() < 1e-9 && (back.y - 50.0).abs() < 1e-9);
     assert_eq!(frame.capture_size(), (3840, 2160));
     assert_eq!(frame.quality(), &quality);
+
+    let invalid_quality = CalibrationQuality { rms_residual_px: f64::NAN, ..quality };
+    let invalid_map = AffineTransform::from_correspondences(&corr_from(2.0, 0.0, 2.0, 80.0)).unwrap();
+    assert!(CoordinateFrame::new(
+        invalid_map,
+        (3840, 2160),
+        fidus_core::calibration::CalibrationMethod::Crosshair,
+        invalid_quality,
+        std::time::SystemTime::now(),
+    )
+    .is_err());
+    assert!(BoundingBox::try_new(1, 1, 1, 2).is_none());
 }
 
 /// Principle 1, enforced by the compiler rather than by review.
@@ -219,7 +287,10 @@ fn a_map_can_only_be_obtained_by_solving_or_inverting() {
 
     // Route 3: the identity constant — reachable, but it carries neither a
     // translation nor a scale, so it cannot smuggle a platform position in…
-    assert_eq!(AffineTransform::IDENTITY.coefficients(), [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
+    assert_eq!(
+        AffineTransform::IDENTITY.coefficients(),
+        [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+    );
     // …and on its own it cannot become a CoordinateFrame, because that needs
     // a SolvedMap. `CoordinateFrame::new(AffineTransform::IDENTITY, ...)`
     // does not compile — the "1:1 default frame" mistake is unexpressible.

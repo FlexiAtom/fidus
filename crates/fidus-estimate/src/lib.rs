@@ -43,6 +43,10 @@ pub use screen_classifier::{ScreenClassifier, WallpaperVerdict};
 pub(crate) const MIN_SCORE: f64 = 0.35;
 /// NCC score at which confidence saturates at 1.0.
 pub(crate) const FULL_SCORE: f64 = 0.9;
+/// Bound caller-controlled template work before any sampling or matching loop.
+/// This protects the no-display estimator from forged public image dimensions;
+/// larger legitimate templates must be tiled or downsampled by the caller.
+const MAX_TARGET_PIXELS: u64 = 16_777_216;
 
 /// One L1 template match, expressed in both coordinate spaces.
 pub(crate) struct L1Match {
@@ -69,7 +73,7 @@ pub(crate) fn l1_match(
     if m.score < MIN_SCORE {
         return None;
     }
-    let (tw, th) = (tpl.width as f64, tpl.height as f64);
+    let (tw, th) = (tpl.width() as f64, tpl.height() as f64);
     Some(L1Match {
         position_logical: frame.physical_to_logical(m.center),
         center_physical: m.center,
@@ -185,10 +189,10 @@ impl FingerprintEstimator {
         let t = self.target.as_ref()?;
         let s = frame.map().linear_scale();
         let (tw, th) = (
-            ((t.template_logical.width as f64 * s).round() as u32).max(1),
-            ((t.template_logical.height as f64 * s).round() as u32).max(1),
+            ((t.template_logical.width() as f64 * s).round() as u32).max(1),
+            ((t.template_logical.height() as f64 * s).round() as u32).max(1),
         );
-        if (tw, th) == (t.template_logical.width, t.template_logical.height) {
+        if (tw, th) == (t.template_logical.width(), t.template_logical.height()) {
             return Some(t.template_logical.clone());
         }
         Some(t.template_logical.resample(tw, th))
@@ -203,7 +207,14 @@ impl Default for FingerprintEstimator {
 
 impl Estimator for FingerprintEstimator {
     fn register_target(&mut self, target: TargetDescription) -> Result<(), EstimateError> {
-        if target.template_logical.width == 0 || target.template_logical.height == 0 {
+        let pixels = u64::from(target.template_logical.width())
+            .checked_mul(u64::from(target.template_logical.height()));
+        let bytes = pixels.and_then(|n| n.checked_mul(4));
+        if !target.template_logical.is_valid()
+            || pixels.is_none_or(|n| n == 0 || n > MAX_TARGET_PIXELS)
+            || bytes != Some(target.template_logical.byte_len() as u64)
+            || target.initial_center.is_some_and(|p| !p.x.is_finite() || !p.y.is_finite())
+        {
             return Err(EstimateError::NoTarget);
         }
         // Refuse appearances that template matching cannot localize, rather
@@ -270,21 +281,28 @@ impl Estimator for FingerprintEstimator {
         let (fw, fh) = frame_img.size();
 
         // Search window: prior position → caller belief → whole screen.
+        // This public tuning knob is untrusted: malformed extents are ignored
+        // so template matching never receives inverted clamp bounds.
+        let search_margin = if self.search_margin_px.is_finite() && self.search_margin_px >= 0.0 {
+            self.search_margin_px
+        } else {
+            48.0
+        };
         let (center, half) = match self.last_logical {
             Some(p) => {
                 let c = frame.logical_to_physical(p);
-                let base = tpl.width.max(tpl.height) as f64;
+                let base = tpl.width().max(tpl.height()) as f64;
                 (
                     c,
-                    base * 1.5 + self.search_margin_px + 64.0 * self.lost_streak as f64,
+                    base * 1.5 + search_margin + 64.0 * self.lost_streak as f64,
                 )
             }
             None => match self.target.as_ref().and_then(|t| t.initial_center) {
                 Some(c0) => {
-                    let base = tpl.width.max(tpl.height) as f64;
+                    let base = tpl.width().max(tpl.height()) as f64;
                     (
                         frame.logical_to_physical(c0),
-                        base * 1.5 + self.search_margin_px,
+                        base * 1.5 + search_margin,
                     )
                 }
                 None => {
@@ -396,8 +414,8 @@ mod tests {
                 // it at 120×80 *physical* pixels — exactly what the
                 // estimator resamples the logical template into.
                 let tpl = test_template().resample(120, 80);
-                for yy in 0..tpl.height {
-                    for xx in 0..tpl.width {
+                for yy in 0..tpl.height() {
+                    for xx in 0..tpl.width() {
                         let px = tx as i64 + xx as i64;
                         let py = ty as i64 + yy as i64;
                         if px < 0 || py < 0 || px >= W as i64 || py >= H as i64 {
@@ -417,6 +435,24 @@ mod tests {
         let mut t = TargetDescription::new(test_template());
         t.initial_center = initial;
         est.register_target(t).expect("valid target");
+    }
+
+    #[test]
+    fn forged_template_dimensions_are_rejected_before_matching() {
+        let mut est = FingerprintEstimator::new();
+        let forged = RgbaImage::from_raw(u32::MAX, 2, vec![0; 4]);
+        assert!(matches!(
+            est.register_target(TargetDescription::new(forged)),
+            Err(EstimateError::NoTarget)
+        ));
+    }
+
+    #[test]
+    fn non_finite_initial_center_is_rejected() {
+        let mut est = FingerprintEstimator::new();
+        let target = TargetDescription::new(test_template())
+            .with_initial_center(LogicalPoint::new(f64::NAN, 1.0));
+        assert!(matches!(est.register_target(target), Err(EstimateError::NoTarget)));
     }
 
     #[test]

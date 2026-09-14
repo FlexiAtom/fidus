@@ -59,11 +59,23 @@ fn run_live_calibrate() -> ExitCode {
             }
         }
     }
-    if let Err(error) = fidus_test::validate_run_for(&records, Some(&run_id), Some(mode)) {
-        eprintln!("protocol error: {error}");
-        return ExitCode::from(3);
+    let summary = match fidus_test::validate_run_for(&records, Some(&run_id), Some(mode)) {
+        Ok(summary) => summary,
+        Err(error) => {
+            eprintln!("protocol error: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    let child_code = output.status.code().unwrap_or(3) as u8;
+    if child_code != 0 {
+        return ExitCode::from(child_code);
     }
-    ExitCode::from(output.status.code().unwrap_or(3) as u8)
+    // A producer may exit zero after emitting a valid failed summary. Treating
+    // that as success would let a protocol-valid calibration failure pass CI.
+    if summary.status == "failed" {
+        return ExitCode::from(1);
+    }
+    ExitCode::SUCCESS
 }
 
 fn parse_stdin() -> ExitCode {

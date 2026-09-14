@@ -31,13 +31,11 @@ use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::Ancho
 use fidus_core::coord::LogicalPoint;
 use fidus_core::io::{MarkerError, MarkerStyle};
 
-use crate::session::{Loop, Session};
+use crate::session::{BufferState, Loop, Session};
 use crate::shm::ShmPool;
 
 /// How long to wait for the initial configure before giving up.
 const CONFIGURE_TIMEOUT: Duration = Duration::from_secs(3);
-/// How long to drain events after a state change before attaching a buffer.
-const ACK_DRAIN: u64 = 60;
 /// Frame callbacks awaited per presentation (belt and braces).
 const SETTLE_FRAMES: u64 = 2;
 
@@ -47,6 +45,7 @@ pub(crate) struct Projector {
     layer_surface: ZwlrLayerSurfaceV1,
     buffers: Option<MarkerBuffers>,
     destroyed: bool,
+    poisoned: bool,
 }
 
 struct MarkerBuffers {
@@ -65,6 +64,31 @@ struct MarkerBuffers {
 /// [`fidus_core::io::CalibrationIo::usable_size_hint`]): it spreads markers
 /// across the screen and never becomes fidus state — off-screen markers are
 /// simply not detected and calibration retries with safer positions.
+fn cleanup_open_failure(
+    l: &mut Loop,
+    layer_surface: &ZwlrLayerSurfaceV1,
+    surface: &wl_surface::WlSurface,
+    error: MarkerError,
+) -> Result<(Projector, (f64, f64)), MarkerError> {
+    layer_surface.destroy();
+    surface.destroy();
+    // The proxies were not usable, but they may already be visible to the
+    // session after configure. Clear them before returning so a retry cannot
+    // submit against a destroyed surface.
+    if l.st.layer_surface.as_ref().is_some_and(|current| current == layer_surface) {
+        l.st.layer_surface = None;
+    }
+    if l.st.overlay_surface.as_ref().is_some_and(|current| current == surface) {
+        l.st.overlay_surface = None;
+    }
+    l.st.configure_seen = false;
+    l.st.closed = false;
+    l.conn
+        .flush()
+        .map_err(|flush| MarkerError::Backend(format!("{error}; cleanup flush failed: {flush}")))?;
+    Err(error)
+}
+
 pub(crate) fn open(l: &mut Loop) -> Result<(Projector, (f64, f64)), MarkerError> {
     let compositor: wl_compositor::WlCompositor = l
         .st
@@ -102,10 +126,14 @@ pub(crate) fn open(l: &mut Loop) -> Result<(Projector, (f64, f64)), MarkerError>
     l.st.closed = false;
     surface.commit();
 
-    l.wait_for(CONFIGURE_TIMEOUT, |st: &Session| st.configure_seen || st.closed)
-        .map_err(|_| MarkerError::Timeout)?;
+    if l
+        .wait_for(CONFIGURE_TIMEOUT, |st: &Session| st.configure_seen || st.closed)
+        .is_err()
+    {
+        return cleanup_open_failure(l, &layer_surface, &surface, MarkerError::Timeout);
+    }
     if l.st.closed {
-        return Err(MarkerError::Closed);
+        return cleanup_open_failure(l, &layer_surface, &surface, MarkerError::Closed);
     }
 
     // Click-through: an empty input region is what actually routes pointer
@@ -126,10 +154,15 @@ pub(crate) fn open(l: &mut Loop) -> Result<(Projector, (f64, f64)), MarkerError>
         (mw as f64 / scale, mh as f64 / scale)
     };
     if hint.0 < 1.0 || hint.1 < 1.0 {
-        return Err(MarkerError::Backend("could not determine usable-area hint".into()));
+        return cleanup_open_failure(
+            l,
+            &layer_surface,
+            &surface,
+            MarkerError::Backend("could not determine usable-area hint".into()),
+        );
     }
 
-    let projector = Projector { surface, layer_surface, buffers: None, destroyed: false };
+    let projector = Projector { surface, layer_surface, buffers: None, destroyed: false, poisoned: false };
     Ok((projector, hint))
 }
 
@@ -146,9 +179,9 @@ fn set_empty_input_region(
 }
 
 /// Tears down all protocol objects. Idempotent; also invoked from `Drop`.
-pub(crate) fn destroy(l: &mut Loop, projector: &mut Projector) {
+pub(crate) fn destroy(l: &mut Loop, projector: &mut Projector) -> Result<(), MarkerError> {
     if projector.destroyed {
-        return;
+        return Ok(());
     }
     projector.layer_surface.destroy();
     projector.surface.destroy();
@@ -160,7 +193,7 @@ pub(crate) fn destroy(l: &mut Loop, projector: &mut Projector) {
     projector.destroyed = true;
     l.st.layer_surface = None;
     l.st.overlay_surface = None;
-    let _ = l.conn.flush();
+    l.conn.flush().map_err(|e| MarkerError::Backend(e.to_string()))
 }
 
 /// Projects a marker with its logical top-left corner at `pos`.
@@ -173,6 +206,9 @@ pub(crate) fn show(
     if projector.destroyed {
         return Err(MarkerError::AlreadyDestroyed);
     }
+    if projector.poisoned {
+        return Err(MarkerError::Backend("marker projector is poisoned after an unconfirmed buffer timeout".into()));
+    }
     ensure_buffers(l, projector, style)?;
 
     let size = projector.buffers.as_ref().expect("allocated above").size;
@@ -182,11 +218,21 @@ pub(crate) fn show(
     // trap, spec §4.1.4).
     projector.layer_surface.set_size(size, size);
     projector.layer_surface.set_anchor(Anchor::Top | Anchor::Left);
-    projector
-        .layer_surface
-        .set_margin(pos.y.round() as i32, 0, 0, pos.x.round() as i32);
+    let left_f = pos.x.round();
+    let top_f = pos.y.round();
+    if !left_f.is_finite() || !top_f.is_finite()
+        || left_f < i32::MIN as f64 || left_f > i32::MAX as f64
+        || top_f < i32::MIN as f64 || top_f > i32::MAX as f64
+    {
+        return Err(MarkerError::Backend("marker coordinate is outside protocol range".into()));
+    }
+    let left = left_f as i32;
+    let top = top_f as i32;
+    projector.layer_surface.set_margin(top, 0, 0, left);
+    let generation = l.st.configure_generation;
     surface.commit();
-    l.drain(ACK_DRAIN);
+    l.wait_for(Duration::from_secs(2), |st| st.closed || st.configure_generation > generation)
+        .map_err(|_| MarkerError::Timeout)?;
     if l.st.closed {
         return Err(MarkerError::Closed);
     }
@@ -216,6 +262,17 @@ fn attach_and_settle(
     for _ in 0..SETTLE_FRAMES {
         let buffers = projector.buffers.as_ref().expect("buffers allocated");
         let buf = if marker_visible { &buffers.marker } else { &buffers.clear };
+        let state = if marker_visible { l.st.marker_buffer_state } else { l.st.clear_buffer_state };
+        if !matches!(state, BufferState::Idle | BufferState::Released) {
+            return Err(MarkerError::Backend("marker buffer is still in use".into()));
+        }
+        if marker_visible {
+            l.st.marker_buffer = Some(buf.clone());
+            l.st.marker_buffer_state = BufferState::Submitted;
+        } else {
+            l.st.clear_buffer = Some(buf.clone());
+            l.st.clear_buffer_state = BufferState::Submitted;
+        }
 
         // frame 请求必须与 attach 同一批次先于 commit 发出；否则后续裸提交
         // 按 Wayland 语义等价于 attach(null)，会分离 buffer，marker 在
@@ -228,8 +285,30 @@ fn attach_and_settle(
         let target = l.st.cb_done + 1;
         l.st.cb_target = target;
         l.wait_for(Duration::from_secs(2), |st| st.cb_done >= target || st.closed)
-            .map_err(|_| MarkerError::Timeout)?;
+            .map_err(|_| {
+                projector.poisoned = true;
+                MarkerError::Timeout
+            })?;
         if l.st.closed {
+            projector.poisoned = true;
+            return Err(MarkerError::Closed);
+        }
+        // A frame callback only reports presentation. The attached wl_buffer
+        // remains compositor-owned until its independent release event.
+        l.wait_for(Duration::from_secs(2), |st| {
+            let released = if marker_visible {
+                st.marker_buffer_state == BufferState::Released
+            } else {
+                st.clear_buffer_state == BufferState::Released
+            };
+            released || st.closed
+        })
+        .map_err(|_| {
+            projector.poisoned = true;
+            MarkerError::Timeout
+        })?;
+        if l.st.closed {
+            projector.poisoned = true;
             return Err(MarkerError::Closed);
         }
     }
@@ -241,10 +320,24 @@ fn ensure_buffers(
     projector: &mut Projector,
     style: &MarkerStyle,
 ) -> Result<(), MarkerError> {
-    let size = style.size_logical.ceil().max(1.0) as u32;
+    if !style.size_logical.is_finite() || style.size_logical <= 0.0 {
+        return Err(MarkerError::Backend("marker size must be finite and positive".into()));
+    }
+    let size_f = style.size_logical.ceil();
+    if size_f > i32::MAX as f64 || size_f > u32::MAX as f64 {
+        return Err(MarkerError::Backend("marker size exceeds protocol limits".into()));
+    }
+    let size = size_f as u32;
     if let Some(b) = projector.buffers.as_ref() {
         if b.size == size && b.rgba == style.rgba {
             return Ok(());
+        }
+        if !matches!(l.st.marker_buffer_state, BufferState::Idle | BufferState::Released)
+            || !matches!(l.st.clear_buffer_state, BufferState::Idle | BufferState::Released)
+        {
+            return Err(MarkerError::Backend(
+                "cannot replace marker buffers before wl_buffer.release".into(),
+            ));
         }
     }
 
@@ -253,10 +346,20 @@ fn ensure_buffers(
         .shm
         .clone()
         .ok_or_else(|| MarkerError::Backend("wl_shm not bound".into()))?;
-    let stride = size as usize * 4;
-    let plane = stride * size as usize;
+    let stride = (size as usize)
+        .checked_mul(4)
+        .ok_or_else(|| MarkerError::Backend("marker stride overflow".into()))?;
+    let plane = stride
+        .checked_mul(size as usize)
+        .ok_or_else(|| MarkerError::Backend("marker plane overflow".into()))?;
+    let pool_size = plane
+        .checked_mul(2)
+        .ok_or_else(|| MarkerError::Backend("marker pool overflow".into()))?;
+    if stride > i32::MAX as usize || plane > i32::MAX as usize {
+        return Err(MarkerError::Backend("marker geometry exceeds protocol limits".into()));
+    }
     let mut shm_pool =
-        ShmPool::create(&shm, plane * 2, &l.st.qh).map_err(|e| MarkerError::Backend(e.to_string()))?;
+        ShmPool::create(&shm, pool_size, &l.st.qh).map_err(|e| MarkerError::Backend(e.to_string()))?;
 
     // Solid marker half; the transparent half stays zeroed.
     let mmap = shm_pool.mmap.as_mut();

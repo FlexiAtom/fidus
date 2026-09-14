@@ -31,22 +31,23 @@ impl PixelFormat {
 
     /// Reads the pixel at byte offset `i` as `[r, g, b, a]`.
     ///
-    /// Callers must ensure `i + 4 <= data.len()`; `x` channels read as
-    /// fully opaque.
-    pub fn read_rgba(self, data: &[u8], i: usize) -> [u8; 4] {
-        let b = [data[i], data[i + 1], data[i + 2], data[i + 3]];
+    /// Returns `None` when the requested four-byte pixel is outside `data`;
+    /// `x` channels read as fully opaque.
+    pub fn read_rgba(self, data: &[u8], i: usize) -> Option<[u8; 4]> {
+        let end = i.checked_add(4)?;
+        let b: [u8; 4] = data.get(i..end)?.try_into().ok()?;
         match self {
             // 0xAARRGGBB little-endian → bytes B G R A
-            PixelFormat::Argb8888 => [b[2], b[1], b[0], b[3]],
-            PixelFormat::Xrgb8888 => [b[2], b[1], b[0], 255],
+            PixelFormat::Argb8888 => Some([b[2], b[1], b[0], b[3]]),
+            PixelFormat::Xrgb8888 => Some([b[2], b[1], b[0], 255]),
             // 0xAABBGGRR little-endian → bytes R G B A
-            PixelFormat::Abgr8888 => [b[0], b[1], b[2], b[3]],
-            PixelFormat::Xbgr8888 => [b[0], b[1], b[2], 255],
+            PixelFormat::Abgr8888 => Some([b[0], b[1], b[2], b[3]]),
+            PixelFormat::Xbgr8888 => Some([b[0], b[1], b[2], 255]),
         }
     }
 
     /// Writes an `[r, g, b, a]` pixel at byte offset `i`.
-    pub fn write_rgba(self, data: &mut [u8], i: usize, rgba: [u8; 4]) {
+    pub fn write_rgba(self, data: &mut [u8], i: usize, rgba: [u8; 4]) -> bool {
         let (r, g, b, a) = (rgba[0], rgba[1], rgba[2], rgba[3]);
         let bytes: [u8; 4] = match self {
             PixelFormat::Argb8888 => [b, g, r, a],
@@ -54,7 +55,14 @@ impl PixelFormat {
             PixelFormat::Abgr8888 => [r, g, b, a],
             PixelFormat::Xbgr8888 => [r, g, b, 255],
         };
-        data[i..i + 4].copy_from_slice(&bytes);
+        let Some(end) = i.checked_add(4) else {
+            return false;
+        };
+        let Some(dst) = data.get_mut(i..end) else {
+            return false;
+        };
+        dst.copy_from_slice(&bytes);
+        true
     }
 }
 
@@ -85,13 +93,53 @@ impl Frame {
         if x >= self.width || y >= self.height {
             return [0, 0, 0, 0];
         }
-        let i = y as usize * self.stride as usize + x as usize * 4;
-        self.format.read_rgba(&self.data, i)
+        let row = (y as usize).checked_mul(self.stride as usize);
+        let pixel = (x as usize).checked_mul(self.format.bpp());
+        let i = row.and_then(|r| pixel.and_then(|p| r.checked_add(p)));
+        match i {
+            Some(i) if i.checked_add(self.format.bpp()).is_some_and(|end| end <= self.data.len()) => {
+                self.format.read_rgba(&self.data, i).unwrap_or([0, 0, 0, 0])
+            }
+            // A malformed public Frame is an invalid measurement, not a reason
+            // to bring down a detector. Treat its unreadable pixels as absent.
+            _ => [0, 0, 0, 0],
+        }
+    }
+
+    /// Whether the announced geometry and backing bytes describe complete rows.
+    pub fn is_valid(&self) -> bool {
+        let Some(row) = (self.width as usize).checked_mul(self.format.bpp()) else {
+            return false;
+        };
+        self.width != 0
+            && self.height != 0
+            && self.stride as usize >= row
+            && (self.height as usize)
+                .checked_mul(self.stride as usize)
+                .is_some_and(|n| n <= self.data.len())
     }
 
     /// Logical dimensions `(width, height)`.
     pub fn size(&self) -> (u32, u32) {
         (self.width, self.height)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Frame, PixelFormat};
+
+    #[test]
+    fn malformed_frame_reads_as_transparent_without_panicking() {
+        let frame = Frame { width: u32::MAX, height: 2, stride: 4, format: PixelFormat::Xrgb8888, data: vec![0; 4] };
+        assert_eq!(frame.rgba_at(0, 1), [0, 0, 0, 0]);
+        assert!(!frame.is_valid());
+    }
+
+    #[test]
+    fn empty_frame_is_invalid() {
+        let frame = Frame { width: 0, height: 0, stride: 0, format: PixelFormat::Xrgb8888, data: Vec::new() };
+        assert!(!frame.is_valid());
     }
 }
 

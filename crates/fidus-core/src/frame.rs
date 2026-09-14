@@ -26,6 +26,22 @@ pub struct CalibrationQuality {
     pub independent_passes: usize,
 }
 
+impl CalibrationQuality {
+    /// Returns whether every metric is finite, non-negative, and internally usable.
+    pub fn is_valid(&self) -> bool {
+        self.rms_residual_px.is_finite()
+            && self.max_residual_px.is_finite()
+            && self.verification_max_err_px.is_finite()
+            && self.consistency_max_err_px.is_finite()
+            && self.rms_residual_px >= 0.0
+            && self.max_residual_px >= 0.0
+            && self.verification_max_err_px >= 0.0
+            && self.consistency_max_err_px >= 0.0
+            && self.sample_count > 0
+            && self.independent_passes > 0
+    }
+}
+
 /// fidus' own coordinate system, produced by a successful calibration and
 /// handed to the C layer (estimator) for incremental tracking.
 ///
@@ -70,6 +86,9 @@ impl CoordinateFrame {
         quality: CalibrationQuality,
         calibrated_at: SystemTime,
     ) -> Result<Self, SolveError> {
+        if capture_size.0 == 0 || capture_size.1 == 0 || !quality.is_valid() {
+            return Err(SolveError::NonFinite);
+        }
         let map = solved.map();
         let inverse = map.inverse()?;
         Ok(Self { map, inverse, capture_size, method, quality, calibrated_at })

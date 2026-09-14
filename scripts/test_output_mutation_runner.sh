@@ -44,6 +44,12 @@ if [[ "$1" == msg && "$2" == output ]]; then
     *) exit 2 ;;
   esac
   printf '%s\t%s\n' "$scale" "$transform" >"$state"
+  if [[ "${FIDUS_FAKE_OUTPUT_MODE:-normal}" == partial-scale-failure && "$4" == scale && "$5" == 1.5 ]]; then
+    exit 1
+  fi
+  if [[ "${FIDUS_FAKE_OUTPUT_MODE:-normal}" == partial-transform-failure && "$4" == transform && "$5" == 180 ]]; then
+    exit 1
+  fi
   exit 0
 fi
 exit 2
@@ -94,6 +100,16 @@ flock -n 8
 expect_rc 3 "$runner" --allow-output-mutation --output eDP-1 --scale 1.25 --transform 90 -- sh -c 'sleep 0.2'
 flock -u 8
 exec 8>&-
+rm -rf "$XDG_RUNTIME_DIR/fidus-output-mutation.lock"
+printf '1\tnormal\n' >"$state"
+export FIDUS_FAKE_OUTPUT_MODE=partial-scale-failure
+expect_rc 4 "$runner" --allow-output-mutation --output eDP-1 --scale 1.5 --transform 180 -- true
+[[ "$(<"$state")" == $'1\tnormal' ]] || { echo 'partial scale apply was not restored' >&2; failures=$((failures + 1)); }
+rm -rf "$XDG_RUNTIME_DIR/fidus-output-mutation.lock"
+printf '1\tnormal\n' >"$state"
+export FIDUS_FAKE_OUTPUT_MODE=partial-transform-failure
+expect_rc 4 "$runner" --allow-output-mutation --output eDP-1 --scale 1.5 --transform 180 -- true
+[[ "$(<"$state")" == $'1\tnormal' ]] || { echo 'partial transform apply was not restored' >&2; failures=$((failures + 1)); }
 rm -rf "$XDG_RUNTIME_DIR/fidus-output-mutation.lock"
 export FIDUS_FAKE_OUTPUT_MODE=malformed
 expect_rc 2 "$runner" --allow-output-mutation --output eDP-1 --scale 1.25 --transform 90 -- true

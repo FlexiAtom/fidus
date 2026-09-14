@@ -46,6 +46,8 @@ pub(crate) struct Session {
     pub layer_surface: Option<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1>,
     pub overlay_surface: Option<wl_surface::WlSurface>,
     pub configure_seen: bool,
+    /// Monotonic configure generation; each configure event advances it.
+    pub configure_generation: u64,
     pub configure_size: (u32, u32),
     pub closed: bool,
 
@@ -60,6 +62,25 @@ pub(crate) struct Session {
     pub cp_y_invert: bool,
     pub cp_ready: bool,
     pub cp_failed: bool,
+    /// Lifecycle of the screencopy buffer. `ready` is deliberately not reuse permission.
+    pub cp_buffer_state: BufferState,
+    pub cp_buffer: Option<wl_buffer::WlBuffer>,
+    pub marker_buffer: Option<wl_buffer::WlBuffer>,
+    pub clear_buffer: Option<wl_buffer::WlBuffer>,
+    pub marker_buffer_state: BufferState,
+    pub clear_buffer_state: BufferState,
+}
+
+/// State tracked for every reusable wl_buffer.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(dead_code)]
+pub(crate) enum BufferState {
+    Idle,
+    Submitted,
+    Ready,
+    Failed,
+    Released,
+    Destroyed,
 }
 
 impl Session {
@@ -76,6 +97,7 @@ impl Session {
             layer_surface: None,
             overlay_surface: None,
             configure_seen: false,
+            configure_generation: 0,
             configure_size: (0, 0),
             closed: false,
             cb_done: 0,
@@ -85,6 +107,12 @@ impl Session {
             cp_y_invert: false,
             cp_ready: false,
             cp_failed: false,
+            cp_buffer_state: BufferState::Idle,
+            cp_buffer: None,
+            marker_buffer: None,
+            clear_buffer: None,
+            marker_buffer_state: BufferState::Idle,
+            clear_buffer_state: BufferState::Idle,
         }
     }
 
@@ -95,6 +123,7 @@ impl Session {
         self.cp_ready = false;
         self.cp_failed = false;
     }
+
 }
 
 /// Owns the connection, the event queue and the session state, and provides
@@ -157,15 +186,6 @@ impl Loop {
         }
     }
 
-    /// Dispatches for a short while so state-change acks (configure) are
-    /// processed before the next buffer attach.
-    pub(crate) fn drain(&mut self, ms: u64) {
-        let _ = self.wait_for(Duration::from_millis(ms), |_| false).or_else(|e| match e {
-            BackendError::Timeout => Ok(()),
-            other => Err(other),
-        });
-        let _ = self.eq.dispatch_pending(&mut self.st);
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -303,13 +323,25 @@ impl Dispatch<wl_callback::WlCallback, ()> for Session {
 
 impl Dispatch<wl_buffer::WlBuffer, ()> for Session {
     fn event(
-        _state: &mut Self,
-        _: &wl_buffer::WlBuffer,
-        _: wl_buffer::Event,
+        state: &mut Self,
+        buffer: &wl_buffer::WlBuffer,
+        event: wl_buffer::Event,
         _: &(),
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
+        if !matches!(event, wl_buffer::Event::Release) {
+            return;
+        }
+        if state.cp_buffer.as_ref().is_some_and(|b| b == buffer) {
+            state.cp_buffer_state = BufferState::Released;
+        }
+        if state.marker_buffer.as_ref().is_some_and(|b| b == buffer) {
+            state.marker_buffer_state = BufferState::Released;
+        }
+        if state.clear_buffer.as_ref().is_some_and(|b| b == buffer) {
+            state.clear_buffer_state = BufferState::Released;
+        }
     }
 }
 
@@ -328,6 +360,7 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for Session {
             zwlr_layer_surface_v1::Event::Configure { serial, width, height } => {
                 proxy.ack_configure(serial);
                 state.configure_seen = true;
+                state.configure_generation = state.configure_generation.saturating_add(1);
                 state.configure_size = (width, height);
             }
             zwlr_layer_surface_v1::Event::Closed => state.closed = true,
@@ -356,15 +389,23 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, ()> for Session {
                     state.cp_y_invert = f.contains(zwlr_screencopy_frame_v1::Flags::YInvert);
                 }
             }
-            Ev::Ready { .. } => state.cp_ready = true,
-            Ev::Failed => state.cp_failed = true,
+            Ev::Ready { .. } => {
+                state.cp_ready = true;
+                if state.cp_buffer_state == BufferState::Submitted {
+                    state.cp_buffer_state = BufferState::Ready;
+                }
+            }
+            Ev::Failed => {
+                state.cp_failed = true;
+                if state.cp_buffer_state == BufferState::Submitted {
+                    state.cp_buffer_state = BufferState::Failed;
+                }
+            }
             _ => {}
         }
     }
 }
 
-/// Maps an announced shm format to a fidus [`PixelFormat`]; `None` for
-/// formats fidus cannot read.
 fn shm_format_to_pixel_format(
     format: WEnum<wl_shm::Format>,
 ) -> Option<PixelFormat> {
@@ -374,5 +415,25 @@ fn shm_format_to_pixel_format(
         Ok(wl_shm::Format::Abgr8888) => Some(PixelFormat::Abgr8888),
         Ok(wl_shm::Format::Xbgr8888) => Some(PixelFormat::Xbgr8888),
         _ => None,
+    }
+}
+
+/// Maps an announced shm format to a fidus [`PixelFormat`]; `None` for
+/// formats fidus cannot read.
+#[cfg(test)]
+mod tests {
+    use super::BufferState;
+
+    #[test]
+    fn ready_is_not_reusable_without_release() {
+        assert_ne!(BufferState::Ready, BufferState::Released);
+        assert!(!matches!(BufferState::Ready, BufferState::Idle | BufferState::Released));
+    }
+
+    #[test]
+    fn failed_and_submitted_are_not_reusable() {
+        for state in [BufferState::Submitted, BufferState::Failed, BufferState::Destroyed] {
+            assert!(!matches!(state, BufferState::Idle | BufferState::Released));
+        }
     }
 }

@@ -31,24 +31,27 @@ build_network=${FIDUS_DOCKER_BUILD_NETWORK:-host}
 docker build --network="$build_network" --pull -f "$root/Dockerfile.live-container" -t "$tag" "$root"
 docker save "$tag" | zstd -T0 -q -o "$tmp/fidus-live-debian12.tar.zst"
 image_id=$(docker image inspect "$tag" --format '{{.Id}}')
+python3 "$root/scripts/generate_sbom.py" --lock "$root/Cargo.lock" --dockerfile "$root/Dockerfile.live-container" --output "$tmp/fidus-live.sbom.spdx.json"
+sbom_sha256=$(sha256sum "$tmp/fidus-live.sbom.spdx.json" | awk '{print $1}')
 [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "malformed image ID" >&2; exit 1; }
 archive_sha256=$(sha256sum "$tmp/fidus-live-debian12.tar.zst" | awk '{print $1}')
 archive_size=$(stat -c '%s' "$tmp/fidus-live-debian12.tar.zst")
-python3 - "$tmp/fidus-live-debian12.manifest.json" "$binding" "$archive_sha256" "$archive_size" "$image_id" <<'PY'
+python3 - "$tmp/fidus-live-debian12.manifest.json" "$binding" "$archive_sha256" "$archive_size" "$image_id" "$sbom_sha256" "$tag" <<'PY'
 import json, pathlib, sys
-out, binding, digest, size, image_id = sys.argv[1:]
+out, binding, digest, size, image_id, sbom_digest, image_ref = sys.argv[1:]
 # This is a new manifest in an isolated output directory; the historical
 # manifest in the repository is never edited or retroactively rebound.
 pathlib.Path(out).write_text(json.dumps({
   "schema_version": 1,
   "artifact": {"filename": "fidus-live-debian12.tar.zst", "size_bytes": int(size), "sha256": digest, "compression": "zstd"},
-  "image": {"reference": "fidus-live:debian12", "image_id": image_id, "entrypoint": ["fidus-test"]},
+  "image": {"reference": image_ref, "image_id": image_id, "entrypoint": ["fidus-test"]},
   "source": {"revision_binding": json.loads(binding)},
-  "provenance": {"signing_required": True}
+  "provenance": {"signing_required": True, "sbom": {"filename": "fidus-live.sbom.spdx.json", "sha256": sbom_digest}}
 }, indent=2) + "\n")
 PY
 printf '%s  %s\n' "$archive_sha256" "fidus-live-debian12.tar.zst" > "$tmp/fidus-live-debian12.tar.zst.sha256"
 cp "$tmp"/fidus-live-debian12.tar.zst* "$out/"
+cp "$tmp/fidus-live.sbom.spdx.json" "$out/"
 printf '%s\n' "$image_id" > "$out/fidus-live-debian12.image-id"
 cp "$tmp/fidus-live-debian12.manifest.json" "$out/"
 printf 'rebuilt output=%s source=%s image=%s\n' "$out" "$commit" "$image_id"

@@ -198,9 +198,9 @@ impl CalibrationIo for BackendSession<'_> {
     fn destroy_projector(&mut self) -> Result<(), MarkerError> {
         match self.projector.as_mut() {
             Some(p) => {
-                marker::destroy(self.l, p);
+                let result = marker::destroy(self.l, p);
                 self.projector = None;
-                Ok(())
+                result
             }
             None => Ok(()),
         }
@@ -210,7 +210,7 @@ impl CalibrationIo for BackendSession<'_> {
 impl Drop for BackendSession<'_> {
     fn drop(&mut self) {
         if let Some(p) = self.projector.as_mut() {
-            marker::destroy(self.l, p);
+            let _ = marker::destroy(self.l, p);
         }
     }
 }

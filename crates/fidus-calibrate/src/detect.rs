@@ -73,14 +73,18 @@ pub enum DetectError {
     /// The two frames have different dimensions.
     #[error("baseline and capture differ in size")]
     SizeMismatch,
+    /// A frame has empty or truncated row storage.
+    #[error("frame buffer is invalid")]
+    InvalidFrame,
 }
 
 /// Finds the single changed region matching the expected marker signature.
 ///
-/// `expected_area` gates the accepted component area; `None` (first marker
-/// of a pass, output scale not yet known) accepts the largest solid
-/// component instead — the topmost overlay marker is the biggest coherent
-/// change by construction.
+/// `expected_area` gates the accepted component area. Without an area prior
+/// the detector accepts exactly one coherent candidate; multiple candidates
+/// are ambiguous because a background repaint can be larger than the marker.
+/// This fail-closed rule trades an occasional retry for never turning an
+/// unrelated large repaint into a coordinate measurement.
 pub fn detect_single_change(
     baseline: &Frame,
     current: &Frame,
@@ -124,6 +128,9 @@ fn changed_mask(
     if baseline.width != current.width || baseline.height != current.height {
         return Err(DetectError::SizeMismatch);
     }
+    if !baseline.is_valid() || !current.is_valid() {
+        return Err(DetectError::InvalidFrame);
+    }
     if baseline.format != current.format {
         return Err(DetectError::SizeMismatch); // mixing formats would be meaningless
     }
@@ -131,15 +138,21 @@ fn changed_mask(
     let (w, h) = (current.width as usize, current.height as usize);
     let stride = current.stride as usize;
     let base_stride = baseline.stride as usize;
-    let mut changed = vec![false; w * h];
+    let Some(row_len) = w.checked_mul(4) else {
+        return Err(DetectError::InvalidFrame);
+    };
+    let Some(mask_len) = w.checked_mul(h) else {
+        return Err(DetectError::InvalidFrame);
+    };
+    let mut changed = vec![false; mask_len];
     let threshold = threshold as i32;
     let mut any_changed = false;
 
     for y in 0..h {
         let c_row = y * stride;
         let b_row = y * base_stride;
-        let c_row_bytes = &current.data[c_row..c_row + w * 4];
-        let b_row_bytes = &baseline.data[b_row..b_row + w * 4];
+        let c_row_bytes = &current.data[c_row..c_row + row_len];
+        let b_row_bytes = &baseline.data[b_row..b_row + row_len];
         // Fast path: identical rows (the common case) need no pixel walk.
         if c_row_bytes == b_row_bytes {
             continue;
@@ -150,7 +163,7 @@ fn changed_mask(
             let changed_px = (0..3).any(|c| {
                 (current.data[i + c] as i32 - baseline.data[bi + c] as i32).abs() > threshold
             });
-            if changed_px && accept(current.format.read_rgba(&current.data, i)) {
+            if changed_px && current.format.read_rgba(&current.data, i).is_some_and(&accept) {
                 changed[y * w + x] = true;
                 any_changed = true;
             }
@@ -236,12 +249,11 @@ fn pick_candidate(
 ) -> Result<Detection, DetectError> {
     match candidates.len() {
         0 => Err(DetectError::AreaMismatch),
-        // Without an area prior the marker is the largest coherent change.
-        _ if expected_area.is_none() => {
-            candidates.sort_by_key(|c| core::cmp::Reverse(c.area));
-            Ok(candidates.remove(0))
-        }
         1 => Ok(candidates.remove(0)),
+        // Without an area prior there is no trustworthy way to rank unrelated
+        // changes. Reject all multi-candidate frames and retry instead of
+        // silently converting a large repaint into a marker measurement.
+        _ if expected_area.is_none() => Err(DetectError::Ambiguous(candidates.len())),
         k => Err(DetectError::Ambiguous(k)),
     }
 }

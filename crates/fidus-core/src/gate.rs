@@ -62,6 +62,12 @@ impl ProbeGate {
                 reason: UnsupportedReason::MissingProtocol { protocol: "zwlr_layer_shell_v1" },
             };
         }
+        if !self.env.wayland_input_region_supported {
+            return CalibrationStatus::NotSupported {
+                method,
+                reason: UnsupportedReason::MissingPrimitive { primitive: "click-through input region" },
+            };
+        }
         if self.env.multi_monitor_count == 0 {
             return CalibrationStatus::NotSupported { method, reason: UnsupportedReason::NoDisplay };
         }

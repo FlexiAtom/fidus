@@ -240,6 +240,21 @@ fn tiny_screen_is_rejected_upfront() {
 }
 
 #[test]
+fn zero_passes_and_zero_verification_are_rejected_without_display() {
+    let mut zero_passes = FakeRoot::new((1024, 768));
+    let cfg = AnchorConfig { passes: 0, ..config(1) };
+    let err = AnchorCalibrator::new(cfg).calibrate(&mut zero_passes).expect_err("zero passes");
+    assert!(matches!(err, CalibrationError::InvalidConfiguration(_)), "{err}");
+    assert!(zero_passes.destroyed);
+
+    let mut zero_verify = FakeRoot::new((1024, 768));
+    let cfg = AnchorConfig { verification_positions: 0, ..config(1) };
+    let err = AnchorCalibrator::new(cfg).calibrate(&mut zero_verify).expect_err("zero verification");
+    assert!(matches!(err, CalibrationError::InvalidConfiguration(_)), "{err}");
+    assert!(zero_verify.destroyed);
+}
+
+#[test]
 fn single_surface_backend_is_refused_cleanly() {
     // A backend that keeps the default `show_markers` (layer-shell style)
     // cannot host L0: the error must be the primitive error, with teardown.

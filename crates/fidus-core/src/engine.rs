@@ -131,11 +131,26 @@ impl FidusEngine {
     /// The overlay surface is guaranteed to be destroyed when this returns,
     /// on success or failure alike (spec §4.4).
     pub fn calibrate(&mut self) -> Result<&CoordinateFrame, CalibrationError> {
+        let method = self
+            .calibrator
+            .as_ref()
+            .ok_or(CalibrationError::NoCalibrator("no calibrator configured"))?
+            .method();
+        let status = self.gate.query_calibrator_availability(method);
+        if status.method() != method || !status.is_usable() {
+            return Err(CalibrationError::Unavailable(format!("{status:?}")));
+        }
+
+        // A recalibration is a replacement transaction, not a fallback probe.
+        // Clearing first prevents a failed or interrupted solve from leaving a
+        // stale map available to estimate(); the new frame is published only
+        // after the complete calibration succeeds.
+        self.frame = None;
         let frame = {
             let calibrator = self
                 .calibrator
                 .as_mut()
-                .ok_or(CalibrationError::NoCalibrator("no calibrator configured"))?;
+                .expect("calibrator checked above");
             let mut io = self.io_factory.open().map_err(|e| CalibrationError::Capture(
                 crate::io::CaptureError::Backend(e.to_string()),
             ))?;
@@ -164,7 +179,11 @@ impl FidusEngine {
         let mut io = self.io_factory.open_capture().map_err(|e| {
             EstimateError::Capture(crate::io::CaptureError::Backend(e.to_string()))
         })?;
-        self.estimator.estimate(io.as_mut(), frame)
+        let estimate = self.estimator.estimate(io.as_mut(), frame)?;
+        if !estimate.is_valid() {
+            return Err(EstimateError::InvalidMeasurement);
+        }
+        Ok(estimate)
     }
 
     /// Registers the target the estimator should track (runtime

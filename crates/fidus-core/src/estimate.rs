@@ -39,8 +39,29 @@ pub struct ProbabilisticPosition {
 
 impl ProbabilisticPosition {
     /// Convenience constructor for a position-only estimate.
+    ///
+    /// This constructor is kept infallible for API compatibility; callers that
+    /// accept untrusted values must use [`Self::try_new`] instead. Invalid
+    /// values are never admitted by [`crate::engine::FidusEngine::estimate`].
     pub fn new(position: LogicalPoint, confidence: f32, source: MeasurementSource) -> Self {
         Self { position, confidence, bbox_physical: None, measured_at: Instant::now(), source }
+    }
+
+    /// Constructs an estimate only when position and confidence are valid.
+    pub fn try_new(position: LogicalPoint, confidence: f32, source: MeasurementSource) -> Option<Self> {
+        let estimate = Self::new(position, confidence, source);
+        estimate.is_valid().then_some(estimate)
+    }
+
+    /// Returns whether this public estimate satisfies the measurement contract.
+    /// Callers that construct estimates directly must reject invalid values
+    /// before admitting them to a confidence pool or engine result.
+    pub fn is_valid(&self) -> bool {
+        self.position.x.is_finite()
+            && self.position.y.is_finite()
+            && self.confidence.is_finite()
+            && (0.0..=1.0).contains(&self.confidence)
+            && self.bbox_physical.as_ref().is_none_or(|bbox| bbox.is_valid())
     }
 }
 
@@ -63,6 +84,9 @@ pub enum EstimateError {
     /// Capturing the screen for a fresh measurement failed.
     #[error(transparent)]
     Capture(#[from] CaptureError),
+    /// The estimator returned a non-finite position or out-of-range confidence.
+    #[error("estimator returned an invalid measurement")]
+    InvalidMeasurement,
     /// The target could not be located and no prior position exists to
     /// report (first search failed). Honesty rule: the pool is never fed a
     /// fabricated position (spec §4.5).

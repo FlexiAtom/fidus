@@ -109,6 +109,12 @@ impl ScreenClassifier {
     /// dynamic with `changed_ratio = 1.0` — a geometry change between two
     /// captures 200 ms apart *is* an unstable screen.
     pub fn compare(&self, a: &Frame, b: &Frame) -> WallpaperVerdict {
+        // A malformed capture is not evidence of a static or dynamic screen.
+        // Treating unreadable bytes as black would silently manufacture a
+        // classification; fail closed by reporting the environment unstable.
+        if !a.is_valid() || !b.is_valid() {
+            return WallpaperVerdict { dynamic: true, changed_ratio: 1.0, samples: 0 };
+        }
         if a.size() != b.size() {
             return WallpaperVerdict { dynamic: true, changed_ratio: 1.0, samples: 0 };
         }

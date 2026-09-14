@@ -400,6 +400,22 @@ fn wallpaper_noise_still_converges() {
 }
 
 #[test]
+fn zero_passes_and_insufficient_samples_fail_without_display() {
+    let screen = Screen { phys_w: 1280, phys_h: 800, panel_h: 40.0, scale: 1.0 };
+    let mut zero_passes = FakeIo::new(screen, Noise::Clean);
+    let cfg = CrosshairConfig { passes: 0, ..CrosshairConfig::default() };
+    let err = CrosshairCalibrator::new(cfg).calibrate(&mut zero_passes).expect_err("zero passes");
+    assert!(matches!(err, CalibrationError::InvalidConfiguration(_)), "{err}");
+    assert!(zero_passes.destroyed);
+
+    let mut too_few = FakeIo::new(screen, Noise::Clean);
+    let cfg = CrosshairConfig { primary_positions: 2, ..CrosshairConfig::default() };
+    let err = CrosshairCalibrator::new(cfg).calibrate(&mut too_few).expect_err("too few primary samples");
+    assert!(matches!(err, CalibrationError::AccuracyBelowThreshold { .. }), "{err}");
+    assert!(too_few.destroyed);
+}
+
+#[test]
 fn usable_area_too_small_fails_and_tears_down() {
     let mut io = FakeIo::new(
         Screen { phys_w: 200, phys_h: 150, panel_h: 10.0, scale: 1.0 },
@@ -499,19 +515,18 @@ fn two_plausible_blobs_are_ambiguous() {
 }
 
 #[test]
-fn no_prior_picks_the_largest_coherent_change() {
+fn no_prior_rejects_multiple_coherent_changes() {
     let screen = Screen { phys_w: 1280, phys_h: 800, panel_h: 40.0, scale: 1.25 };
     let style = MarkerStyle::DEFAULT;
     let pos = LogicalPoint::new(350.0, 220.0);
-    // 30×30 patch (900 px²) vs marker (~1225 px²): marker must win when no
-    // area prior exists (first measurement of a pass).
+    // Two coherent changes without an area prior are ambiguous, even when one
+    // is smaller: background repaint size is not a trustworthy marker signal.
     let baseline = render(&screen, None, &[(900, 400, 30, 30)], &[]);
     let post = render(&screen, Some((pos, style)), &[(500, 550, 30, 30)], &[]);
 
-    let det = detect_single_change(&baseline, &post, None, &DetectConfig::default())
-        .expect("largest change wins without prior");
-    let (x0, y0, x1, y1) = marker_rect(&screen, pos, &style);
-    assert_eq!((det.bbox.x0, det.bbox.y0, det.bbox.x1, det.bbox.y1), (x0, y0, x1, y1));
+    let err = detect_single_change(&baseline, &post, None, &DetectConfig::default())
+        .expect_err("multiple changes must fail closed without an area prior");
+    assert!(matches!(err, DetectError::Ambiguous(count) if count >= 2), "{err}");
 }
 
 

@@ -8,7 +8,7 @@
 新方向严格经过：
 
 ```text
-提案 → 草案 → 方案 → 实现 → 全量审查
+提案 → 自审裁枝 → 草案 → 方案 → 可执行性评估（必要时计划书）→ 实现 → 全量审查
 ```
 
 各阶段的准入和产出：
@@ -36,7 +36,7 @@
 
 ### 2.2 正在进行的草案/方案
 
-- **核心库完全体收口与边界硬化**：草案位于 `docs/drafts/complete-state-hardening.md`，当前待全审；WP-A–G 只定义接口、失效模式、无显示验收和发布边界，未授权直接实现。
+- **核心库完全体收口与边界硬化**：已由 `docs/drafts/complete-state-hardening.md` 转入 `docs/spec.md §8.8` 方案；WP-A–G/R1–R4 已完成部分代码实现与无显示回归，但本轮全量复审发现检测器最大 blob 误选、Gate 未消费 input-region 能力、公开 RgbaImage 可伪造尺寸、配置溢出/资源预算及 Wayland deferred retirement 等 Critical/High 风险仍开放。真实 compositor 异常、稳定 identity、跨机器发布和正式发布仍独立挂起。
 
 | 项目 | 当前阶段 | 依据 | 当前边界 |
 |---|---|---|---|
@@ -107,7 +107,7 @@ P5 的实现工作完成后，下一阶段不是立即发布，而是对整个�
 
 1. **保持 P5 无显示回归全绿**：F1–F42 逐项映射见 `docs/measurements/p5-f1-f42-matrix.md`；当前 real-pending 项不得伪造为 pass。
 2. **保持 exit-code/summary 语义一致**：`not_requested | confirmed | unverified`、recovery code 4、child/timeout/external-change 和唯一 summary 已由 runner fake 回归覆盖。
-3. **全量审查完成（有条件通过／未收口）**：当前 HEAD 的复盘见 `docs/review-process.md` §8。本轮已修复 fidus-test 协议值边界、summary 一致性、checked_add、malformed public record 索引和 wrapper failed summary 退出语义；Fused 置信度、Wayland buffer release、非有限输入/坏 Frame、Anchor 多轮/一般 affine、runner escaped session/partial apply/TOCTOU/锁清理/mount 输入/信号竞态仍是开放高风险项。
+3. **全量审查后核心边界修复执行中**：当前审查见 `docs/review-process.md` §7，批准范围见 `docs/proposals/core-hardening-followup.md`。本轮已修复 Gate input-region 能力误报、无面积先验时的多 blob 最大候选误选、目标模板伪造尺寸/资源预算、initial center 非有限值，以及 Anchor/Crosshair 配置计数、有限性、scale 区间和工作预算，并补充对应无显示回归；Engine 估计结果和 `RgbaImage::is_valid()` 也已加入 fail-closed 边界。Wayland 完整 deferred retirement fake 状态机、X11 fixture、ProbabilisticPosition 旧兼容构造的 API 收紧与 checked-in 旧 manifest/provenance 格式仍未完成；open 失败陈旧 proxy 清理和 timeout 后 projector poisoned 保护已实现；`try_new()`、Engine 终局校验、签名脚本防重绑定、build_release SBOM/tag 输出和 verifier manifest reference 已实现并通过离线/语法边界验证。RgbaImage 字段已私有化并迁移到 checked constructor/getter/validity API。真实 compositor 异常、稳定 identity、跨机器验证、正式发布和 push 仍排除。
 4. **供应链与离线门禁**：vendor 离线 CI、声明式 SPDX SBOM、OpenPGP signature 与 SLSA provenance attestation 已实现并通过本机验证；签名是本机发布者密钥，不等于外部 CI 身份。
 5. **下一轮候选**：修正发布产物与当前 source revision 的绑定，补 registry manifest/跨机器验证；评估是否把经典壁纸纳入不含外部版权素材的可复现合成测试；shellcheck 仅在工具纳入 CI 后执行。
    - 本轮已裁决并实现：不引入图片依赖、不读取外部壁纸，采用 `tools/generate_test_images.py` 生成 fractal/texture/gradient/periodic 四类 RGB PNG，并以 `tests/fixtures/images/manifest.json` 登记尺寸与 SHA-256；`tools/test_generate_test_images.py` 已接入 `scripts/ci_fidus_test.sh` 无显示门禁。

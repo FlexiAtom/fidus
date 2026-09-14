@@ -169,9 +169,21 @@ impl X11Backend {
         let screen = self.screen();
         let (root, depth) = (screen.root, screen.root_depth);
         for (pos, style) in marks {
-            let size = style.size_logical.ceil().max(1.0) as u16;
-            let x = pos.x.round().clamp(0.0, i16::MAX as f64) as i16;
-            let y = pos.y.round().clamp(0.0, i16::MAX as f64) as i16;
+            if !style.size_logical.is_finite() || style.size_logical <= 0.0 {
+                return Err(MarkerError::Backend("marker size must be finite and positive".into()));
+            }
+            let size_f = style.size_logical.ceil();
+            if size_f > u16::MAX as f64 {
+                return Err(MarkerError::Backend("marker size exceeds X11 limits".into()));
+            }
+            let x_f = pos.x.round();
+            let y_f = pos.y.round();
+            if !x_f.is_finite() || !y_f.is_finite() || x_f < i16::MIN as f64 || x_f > i16::MAX as f64 || y_f < i16::MIN as f64 || y_f > i16::MAX as f64 {
+                return Err(MarkerError::Backend("marker coordinate exceeds X11 limits".into()));
+            }
+            let size = size_f as u16;
+            let x = x_f as i16;
+            let y = y_f as i16;
             let pixel = self.pixel_of(style.rgba)?;
             let window = self
                 .conn
@@ -211,6 +223,9 @@ impl X11Backend {
     fn get_root_image(&self, size: Option<(u32, u32)>) -> Result<Frame, CaptureError> {
         let screen = self.screen();
         let (w, h) = size.unwrap_or(self.root_size);
+        if w == 0 || h == 0 || w > u16::MAX as u32 || h > u16::MAX as u32 {
+            return Err(CaptureError::Backend("X11 capture geometry is outside protocol limits".into()));
+        }
         let reply = self
             .conn
             .get_image(ImageFormat::Z_PIXMAP, screen.root, 0, 0, w as u16, h as u16, !0)
@@ -230,13 +245,20 @@ impl X11Backend {
                 px.reverse();
             }
         }
-        let needed = w as usize * h as usize * 4;
+        let Some(needed) = (w as usize)
+            .checked_mul(h as usize)
+            .and_then(|n| n.checked_mul(4)) else {
+            return Err(CaptureError::Backend("X11 capture buffer size overflow".into()));
+        };
         if data.len() < needed {
             return Err(CaptureError::Backend("truncated GetImage reply".into()));
         }
         // Scanlines are padded to 32-bit units, which is exact for 4 bpp.
         data.truncate(needed);
-        Ok(Frame { width: w, height: h, stride: w * 4, format: PixelFormat::Xrgb8888, data })
+        let Some(stride) = w.checked_mul(4) else {
+            return Err(CaptureError::Backend("X11 capture stride overflow".into()));
+        };
+        Ok(Frame { width: w, height: h, stride, format: PixelFormat::Xrgb8888, data })
     }
 }
 

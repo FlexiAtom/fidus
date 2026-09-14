@@ -155,11 +155,19 @@ child_pgid=
 child_sid=
 child_cleanup_verified=0
 child_escape_detected=0
+lock_cleanup_failed=0
 interrupted=0
 timeout_hit=0
 external_change=0
 applied_state=
-trap 'interrupted=1; trap - INT TERM; if [[ -n "$child_pgid" ]]; then kill -TERM -- "-$child_pgid" 2>/dev/null || true; fi; [[ "$state" == Running ]] && state=RestoreRequested' INT TERM
+signal_handler() {
+  interrupted=1
+  # Cleanup owns restoration and is deliberately non-reentrant.  A signal
+  # during apply/read-back only marks the run; the next checkpoint restores.
+  if [[ -n "$child_pgid" ]]; then kill -TERM -- "-$child_pgid" 2>/dev/null || true; fi
+  [[ "$state" == Running || "$state" == AppliedAndReadBack ]] && state=RestoreRequested
+}
+trap signal_handler INT TERM
 trap cleanup EXIT
 original_scale=${snapshot%%$'\t'*}
 original_transform=${snapshot##*$'\t'}
@@ -223,6 +231,18 @@ stop_child_group() {
   child_pgid=
 }
 
+capture_applied_state() {
+  local observed
+  observed=$(read_output 2>/dev/null || true)
+  if [[ -n "$observed" ]]; then
+    applied_state="$observed"
+  else
+    # Unknown state must never be treated as the requested state: restoring
+    # across an unreadable observation could overwrite an external mutation.
+    applied_state=__unknown__
+  fi
+}
+
 restore_output() {
   restore_attempted=1
   local current expected actual
@@ -260,21 +280,40 @@ cleanup() {
   if [[ "$summary_emitted" == 0 && "$restore_attempted" == 1 ]]; then
     summary_emitted=1
     teardown=unknown
-    if [[ "$timeout_hit" == 0 && "$child_escape_detected" == 0 && ( -z "$child_sid" || "$child_cleanup_verified" == 1 ) ]]; then
-      teardown=confirmed
+    # This runner has only NameOnly output identity.  Even a fully reaped
+    # child cannot prove that the restored output is the same object.
+    # Escaped sessions, cleanup failures, or external changes are explicitly
+    # unverified rather than being turned into a successful-looking result.
+    # NameOnly cannot prove stable output identity, so teardown never becomes
+    # confirmed here. Keep the explicit unknown result even after read-back.
+    teardown=unknown
+    # Release the kernel lock before removing its private directory.  Failure
+    # to remove either path is not harmless: it leaves ownership ambiguous and
+    # must be visible in the diagnostic (the stale directory remains fail-closed).
+    flock -u 9 2>/dev/null || lock_cleanup_failed=1
+    exec 9>&-
+    rm -f "$lock_file" 2>/dev/null || lock_cleanup_failed=1
+    rmdir "$lock_path" 2>/dev/null || lock_cleanup_failed=1
+    [[ "$lock_cleanup_failed" == 0 ]] || teardown=unknown
+    if ! printf 'FIDUS_RESULT version=1 kind=lifecycle run_id=p5-output status=unverified execution_mode=live-host teardown=%s recovery=unverified\n' \
+      "$teardown"; then
+      echo 'HarnessError: cannot write lifecycle result' >&2
     fi
-    printf 'FIDUS_RESULT version=1 kind=lifecycle run_id=p5-output status=unverified execution_mode=live-host teardown=%s recovery=unverified\n' \
-      "$teardown"
-    printf 'FIDUS_RESULT version=1 kind=summary run_id=p5-output status=failed execution_mode=live-host records_total=1 records_ok=0 records_failed=1\n'
-    printf 'P5_DIAGNOSTIC timeout=%s external_change=%s\n' "$timeout_hit" "$external_change" >&2
+    if ! printf 'FIDUS_RESULT version=1 kind=summary run_id=p5-output status=failed execution_mode=live-host records_total=1 records_ok=0 records_failed=1\n'; then
+      echo 'HarnessError: cannot write summary result' >&2
+    fi
+    printf 'P5_DIAGNOSTIC timeout=%s external_change=%s lock_cleanup_failed=%s\n' \
+      "$timeout_hit" "$external_change" "$lock_cleanup_failed" >&2
+  else
+    # Still release the lock on the unusual re-entry path.
+    flock -u 9 2>/dev/null || lock_cleanup_failed=1
+    exec 9>&-
+    rm -f "$lock_file" 2>/dev/null || lock_cleanup_failed=1
+    rmdir "$lock_path" 2>/dev/null || lock_cleanup_failed=1
   fi
-  rm -f "$child_out" "$child_err"
-  flock -u 9 2>/dev/null || true
-  exec 9>&-
-  rm -f "$lock_file" 2>/dev/null || true
-  rmdir "$lock_path" 2>/dev/null || true
+  rm -f "$child_out" "$child_err" 2>/dev/null || true
 }
-trap 'interrupted=1; trap - INT TERM; if [[ -n "$child_pgid" ]]; then kill -TERM -- "-$child_pgid" 2>/dev/null || true; fi; [[ "$state" == Running ]] && state=RestoreRequested' INT TERM
+trap signal_handler INT TERM
 trap cleanup EXIT
 
 finish() {
@@ -291,14 +330,22 @@ finish() {
 if [[ "$interrupted" == 1 ]]; then
   finish 130
 fi
+# Record the state each setter is expected to have produced before checking its
+# status.  A compositor may apply a setter and then return an error; leaving
+# this empty would make cleanup overwrite an unclassified state.
+applied_state="$requested_scale"$'\t'"$original_transform"
 "$niri_bin" msg output "$output" scale "$requested_scale" >/dev/null 2>&1 || {
+  capture_applied_state
   echo "EnvironmentUnavailable: scale command failed" >&2
   finish 2
 }
+applied_state="$requested_scale"$'\t'"$original_transform"
 "$niri_bin" msg output "$output" transform "$requested_transform" >/dev/null 2>&1 || {
+  capture_applied_state
   echo "EnvironmentUnavailable: transform command failed" >&2
   finish 2
 }
+applied_state="$requested_scale"$'\t'"$requested_transform"
 state=AppliedAndReadBack
 applied=$(read_output 2>/dev/null || true)
 expected_applied="$requested_scale"$'\t'"$requested_transform"

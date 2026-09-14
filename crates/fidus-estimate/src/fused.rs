@@ -51,6 +51,10 @@ const DEFAULT_R_MIN_PX2: f64 = 1.0;
 /// Default measurement variance at confidence 0.0 (≈20 px std. dev.).
 const DEFAULT_R_MAX_PX2: f64 = 400.0;
 
+fn finite_nonnegative(value: f64, fallback: f64) -> f64 {
+    if value.is_finite() && value >= 0.0 { value } else { fallback }
+}
+
 /// The fused L7 estimator (P2-c).
 pub struct FusedEstimator {
     /// The L1 layer: target storage and template matching.
@@ -160,8 +164,13 @@ impl FusedEstimator {
 
     /// Half-extent of the search window around a predicted center.
     fn search_half(&self, tpl: &fidus_core::target::RgbaImage) -> f64 {
-        let base = tpl.width.max(tpl.height) as f64 * 1.5;
-        base + self.search_margin_px + self.widen_per_miss_px * self.lost_streak as f64
+        // These knobs are public input. Negative or non-finite extents can make
+        // SearchRoi's lower bound exceed its upper bound and panic in clamp;
+        // ignore malformed tuning rather than turning it into a fake geometry.
+        let margin = finite_nonnegative(self.search_margin_px, 48.0);
+        let widen = finite_nonnegative(self.widen_per_miss_px, 64.0);
+        let base = tpl.width().max(tpl.height()) as f64 * 1.5;
+        (base + margin + widen * self.lost_streak as f64).max(0.0)
     }
 
     /// Assimilates a fused measurement: reset on first fix / re-acquisition,
@@ -237,7 +246,7 @@ impl Estimator for FusedEstimator {
         let l8 = predicted.and_then(|pred| {
             let gate_region = self
                 .last_bbox
-                .unwrap_or_else(|| bbox_around(pred, tpl.width as f64, tpl.height as f64));
+                .unwrap_or_else(|| bbox_around(pred, tpl.width() as f64, tpl.height() as f64));
             let half = self.search_half(&tpl);
             let search_roi = BoundingBox {
                 x0: (pred.x - half) as i64,
@@ -256,7 +265,7 @@ impl Estimator for FusedEstimator {
             let (center, half) = match predicted {
                 Some(p) => (p, self.search_half(&tpl)),
                 None => {
-                    let (tw, th) = (tpl.width.max(tpl.height) as f64, tpl.height as f64);
+                    let (tw, th) = (tpl.width().max(tpl.height()) as f64, tpl.height() as f64);
                     (
                         PhysicalPoint::new(fw as f64 / 2.0, fh as f64 / 2.0),
                         fw.max(fh) as f64 + tw.max(th),
@@ -267,13 +276,27 @@ impl Estimator for FusedEstimator {
         };
 
         // 4.–6. Fuse and assimilate.
+        // Both layers verify the same registered appearance, so both must obey
+        // its ambiguity ceiling before fusion.  Capping only FingerprintEstimator
+        // is insufficient: L1Match is shared with this path and L8 can otherwise
+        // win the comparison (or the corroboration bonus can raise L1 above the
+        // ceiling), turning a known ambiguous render into a high-confidence KF
+        // measurement.  If this cap is ever removed, the failure mode is a
+        // silent fictitious position, not an error; the registration policy's
+        // explicit reduced-confidence opt-in is the only safe fallback.
+        let cap = self.l1.confidence_ceiling();
+        let l1 = l1.map(|mut a| {
+            a.confidence = a.confidence.min(cap);
+            a
+        });
+        let l8 = l8.map(|(p, confidence, bbox)| (p, confidence.min(cap), bbox));
         match (l1, l8) {
             (Some(a), Some(b)) => {
                 let agree = a.center_physical.distance(b.0) <= AGREE_PX;
                 let (pos, conf, bbox) = if agree {
-                    // Corroborated: keep L1's subpixel position, boost the
-                    // confidence.
-                    (a.position_logical, (a.confidence + CORROBORATION_BONUS).min(1.0), a.bbox_physical)
+                    // Corroborated: keep L1's subpixel position, but never let
+                    // the bonus exceed the registered appearance's ceiling.
+                    (a.position_logical, (a.confidence + CORROBORATION_BONUS).min(cap), a.bbox_physical)
                 } else if a.confidence >= b.1 {
                     (a.position_logical, a.confidence, a.bbox_physical)
                 } else {

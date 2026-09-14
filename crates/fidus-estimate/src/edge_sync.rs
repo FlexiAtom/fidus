@@ -145,6 +145,13 @@ pub struct EdgeSyncObservation {
 /// What one [`EdgeSync::observe`] call concluded.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EdgeSyncOutcome {
+    /// The input frame was malformed and was refused as a measurement.
+    ///
+    /// Failure mode: accepting incomplete bytes would let transparent fallback
+    /// pixels enter the differ and could make later indexing unsafe. The frame
+    /// is not stored as a reference, so malformed input cannot poison a later
+    /// comparison.
+    InvalidFrame,
     /// The reference was (re)stored this call and nothing comparable came
     /// out: first observation, an output geometry change, or a
     /// below-threshold change from which no target-like candidate
@@ -213,6 +220,9 @@ impl EdgeSync {
         verify: &RgbaImage,
         now: Instant,
     ) -> EdgeSyncOutcome {
+        if !frame.is_valid() {
+            return EdgeSyncOutcome::InvalidFrame;
+        }
         let (fw, fh) = frame.size();
 
         // Store / refresh the reference.
@@ -259,7 +269,7 @@ impl EdgeSync {
             return EdgeSyncOutcome::StaticEmpty;
         }
 
-        let expected_area = verify.width as f64 * verify.height as f64;
+        let expected_area = verify.width() as f64 * verify.height() as f64;
         let predicted = gate_region.center();
         let candidates: Vec<BoundingBox> = blobs_of(mask_roi, &mask)
             .into_iter()
@@ -306,12 +316,12 @@ impl EdgeSync {
         // peak. Contained by the score floor below — the window is still
         // bounded by the blob's own size, and the match must correlate with
         // the caller's own render, not merely land somewhere plausible.
-        let grow_x = (verify.width as f64 - bb.width() as f64).abs() / 2.0;
-        let grow_y = (verify.height as f64 - bb.height() as f64).abs() / 2.0;
+        let grow_x = (verify.width() as f64 - bb.width() as f64).abs() / 2.0;
+        let grow_y = (verify.height() as f64 - bb.height() as f64).abs() / 2.0;
         let roi = template::SearchRoi {
             center: (
-                bb.center().x - verify.width as f64 / 2.0,
-                bb.center().y - verify.height as f64 / 2.0,
+                bb.center().x - verify.width() as f64 / 2.0,
+                bb.center().y - verify.height() as f64 / 2.0,
             ),
             half: VERIFY_HALF_PX + grow_x.max(grow_y),
         };
@@ -322,12 +332,12 @@ impl EdgeSync {
                 continue;
             }
             let obs = EdgeSyncObservation {
-                bbox: centered_bbox(m.center, verify.width, verify.height),
+                bbox: centered_bbox(m.center, verify.width(), verify.height()),
                 confidence: ((m.score - MIN_SCORE) / (FULL_SCORE - MIN_SCORE))
                     .clamp(0.0, 1.0) as f32,
             };
-            if bb.width() - verify.width as i64 >= DEPARTURE_EXCESS_PX
-                || bb.height() - verify.height as i64 >= DEPARTURE_EXCESS_PX
+            if bb.width() - verify.width() as i64 >= DEPARTURE_EXCESS_PX
+                || bb.height() - verify.height() as i64 >= DEPARTURE_EXCESS_PX
             {
                 saw_departure_excess = true;
             }
@@ -657,16 +667,16 @@ mod tests {
         };
         let c = m.bbox.center();
         assert!(
-            (c.x - (280.0 + tpl.width as f64 / 2.0)).abs() < 1.5,
+            (c.x - (280.0 + tpl.width() as f64 / 2.0)).abs() < 1.5,
             "center x = {} (expected {})",
             c.x,
-            280.0 + tpl.width as f64 / 2.0
+            280.0 + tpl.width() as f64 / 2.0
         );
         assert!(
-            (c.y - (220.0 + tpl.height as f64 / 2.0)).abs() < 1.5,
+            (c.y - (220.0 + tpl.height() as f64 / 2.0)).abs() < 1.5,
             "center y = {} (expected {})",
             c.y,
-            220.0 + tpl.height as f64 / 2.0
+            220.0 + tpl.height() as f64 / 2.0
         );
         assert!(m.confidence > 0.6, "confidence = {}", m.confidence);
     }
@@ -934,6 +944,16 @@ mod tests {
             es.observe(&f, region, roi, &tpl, t0 + Duration::from_millis(600)),
             EdgeSyncOutcome::NoReference
         );
+    }
+
+    #[test]
+    fn malformed_frame_is_refused_without_storing_a_reference() {
+        let mut edge = EdgeSync::new();
+        let bad = Frame { width: 8, height: 8, stride: 32, format: PixelFormat::Argb8888, data: vec![0; 4] };
+        let roi = BoundingBox { x0: 0, y0: 0, x1: 8, y1: 8 };
+        let template = RgbaImage::from_raw(1, 1, vec![0; 4]);
+        assert_eq!(edge.observe(&bad, roi, roi, &template, Instant::now()), EdgeSyncOutcome::InvalidFrame);
+        assert!(edge.reference.is_none());
     }
 }
 

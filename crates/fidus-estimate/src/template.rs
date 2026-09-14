@@ -133,7 +133,7 @@ impl SampledTemplate {
     /// happened to be highest. Blurring first makes the coarse landscape a
     /// smooth hill whose summit is within a step of the true peak.
     fn build(template: &RgbaImage, step: u32) -> Self {
-        let (tw, th) = (template.width, template.height);
+        let (tw, th) = (template.width(), template.height());
         let step = step.max(1);
         let mut samples = Vec::new();
         let mut y = 0;
@@ -171,8 +171,8 @@ fn block_mean_template(t: &RgbaImage, x0: u32, y0: u32, step: u32) -> f32 {
         return t.luma_at(x0, y0);
     }
     let (mut sum, mut n) = (0.0f32, 0.0f32);
-    for y in y0..(y0 + step).min(t.height) {
-        for x in x0..(x0 + step).min(t.width) {
+    for y in y0..(y0 + step).min(t.height()) {
+        for x in x0..(x0 + step).min(t.width()) {
             sum += t.luma_at(x, y);
             n += 1.0;
         }
@@ -243,7 +243,7 @@ impl core::fmt::Display for Unlocatable {
 /// The cases this must catch — gradients and near-uniform fills, which are
 /// ambiguous at *every* radius — cannot slip through any radius choice.
 pub fn localizability(template: &RgbaImage) -> Result<f64, Unlocatable> {
-    let (w, h) = (template.width as i64, template.height as i64);
+    let (w, h) = (template.width() as i64, template.height() as i64);
     let min_radius = SELF_SIMILARITY_RADII[0];
     // Need real overlap left after the largest shift, not merely a nonzero
     // one: a sliver of a few pixels produces noisy, meaningless correlations.
@@ -294,7 +294,7 @@ pub fn localizability(template: &RgbaImage) -> Result<f64, Unlocatable> {
 /// their overlap. `None` when the overlap is too small or either side is
 /// flat there.
 fn self_ncc(template: &RgbaImage, dx: i64, dy: i64) -> Option<f64> {
-    let (w, h) = (template.width as i64, template.height as i64);
+    let (w, h) = (template.width() as i64, template.height() as i64);
     let (x0, x1) = ((-dx).max(0), w.min(w - dx));
     let (y0, y1) = ((-dy).max(0), h.min(h - dy));
     if x1 - x0 < 4 || y1 - y0 < 4 {
@@ -356,7 +356,10 @@ fn box_downsample(plane: &(u32, u32, Vec<f32>), step: u32) -> (u32, u32, Vec<f32
 
 /// Computes the tightly-packed luma plane of `frame`.
 pub(crate) fn luma_plane(frame: &Frame) -> (u32, u32, Vec<f32>) {
-    let mut p = Vec::with_capacity(frame.width as usize * frame.height as usize);
+    let Some(len) = (frame.width as usize).checked_mul(frame.height as usize) else {
+        return (0, 0, Vec::new());
+    };
+    let mut p = Vec::with_capacity(len);
     for y in 0..frame.height {
         for x in 0..frame.width {
             let [r, g, b, _] = frame.rgba_at(x, y);
@@ -412,10 +415,23 @@ fn ncc(
 /// the top few candidates at full resolution; phase 3 fits a 1D parabola per
 /// axis for subpixel precision.
 pub fn match_template(frame: &Frame, template: &RgbaImage, roi: SearchRoi) -> Option<TemplateMatch> {
+    if !frame.is_valid() {
+        return None;
+    }
     let plane = luma_plane(frame);
     let (fw, fh) = (plane.0, plane.1);
-    let (tw, th) = (template.width, template.height);
-    if tw == 0 || th == 0 || tw + 2 > fw || th + 2 > fh {
+    let (tw, th) = (template.width(), template.height());
+    if tw == 0 || th == 0 || tw.checked_add(2).is_none_or(|n| n > fw) || th.checked_add(2).is_none_or(|n| n > fh) {
+        return None;
+    }
+    // SearchRoi is public input, so malformed geometry must not reverse the
+    // bounds passed to `clamp` (which panics when min > max). Rejecting it is
+    // preferable to fabricating a match from an untrusted search request.
+    if !roi.half.is_finite()
+        || roi.half < 0.0
+        || !roi.center.0.is_finite()
+        || !roi.center.1.is_finite()
+    {
         return None;
     }
 
@@ -595,6 +611,21 @@ mod tests {
             match_template(&flat, &patch_template(16, 16), roi).is_none(),
             "a flat frame must not produce a match"
         );
+    }
+
+    #[test]
+    fn malformed_roi_is_refused_without_clamp_panic() {
+        let f = frame_with_patch(60, 40, 16, 16);
+        let tpl = patch_template(16, 16);
+        for half in [-1.0, f64::NAN, f64::INFINITY] {
+            assert!(
+                match_template(&f, &tpl, SearchRoi { center: (68.0, 48.0), half }).is_none(),
+                "malformed half extent {half:?} must be rejected"
+            );
+        }
+        for center in [(f64::NAN, 48.0), (68.0, f64::INFINITY)] {
+            assert!(match_template(&f, &tpl, SearchRoi { center, half: 40.0 }).is_none());
+        }
     }
 
     #[test]

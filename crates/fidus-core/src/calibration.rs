@@ -214,7 +214,19 @@ pub enum CalibrationError {
     /// Marker projection failed.
     #[error(transparent)]
     Marker(#[from] MarkerError),
+    /// The configured calibrator is not currently permitted by the capability gate.
+    ///
+    /// Failure mode: the environment may lose a required protocol or permission
+    /// after engine assembly. Refusing before opening a session prevents an
+    /// overlay from being created under a stale capability assumption; callers
+    /// must re-probe and rebuild the engine when the environment changes.
+    #[error("calibration method is unavailable: {0}")]
+    Unavailable(String),
     /// The backend has no calibrator installed for this method.
     #[error("no calibrator installed for {0}")]
     NoCalibrator(&'static str),
+    /// Public calibration configuration is malformed or exceeds the bounded
+    /// no-display work budget.
+    #[error("invalid calibration configuration: {0}")]
+    InvalidConfiguration(String),
 }

@@ -10,14 +10,15 @@ use std::time::Duration;
 use wayland_client::protocol::{wl_buffer, wl_shm};
 use fidus_core::io::{CaptureError, Frame, PixelFormat};
 
-use crate::session::Loop;
+use crate::session::{BufferState, Loop};
 use crate::shm::ShmPool;
 
 /// How long to wait for screencopy events before giving up.
 const CAPTURE_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Reusable capture buffer: one pool, one buffer, sized to the last frame.
-/// Reuse is safe once the compositor has sent `ready` for the previous copy.
+/// Reuse is safe only after the compositor sends `wl_buffer.release`; `ready`
+/// only means that the pixels can be read.
 pub(crate) struct CopyBuffer {
     shm_pool: ShmPool,
     buffer: wl_buffer::WlBuffer,
@@ -39,6 +40,12 @@ pub(crate) fn capture(l: &mut Loop, cache: &mut Option<CopyBuffer>) -> Result<Fr
         .cloned()
         .ok_or_else(|| CaptureError::Backend("no output bound".into()))?;
 
+    if cache.is_some() && !matches!(l.st.cp_buffer_state, BufferState::Idle | BufferState::Released) {
+        l.wait_for(CAPTURE_TIMEOUT, |st| {
+            matches!(st.cp_buffer_state, BufferState::Released | BufferState::Idle)
+        })
+        .map_err(|_| CaptureError::Timeout)?;
+    }
     l.st.reset_screencopy();
     let frame = manager.capture_output(0, &output, &l.st.qh, ());
 
@@ -52,9 +59,18 @@ pub(crate) fn capture(l: &mut Loop, cache: &mut Option<CopyBuffer>) -> Result<Fr
         .expect("format event precedes size availability")
         .ok_or(CaptureError::UnsupportedFormat(-1))?;
 
-    let byte_size = stride as usize * height as usize;
-    if byte_size == 0 || width == 0 || height == 0 {
-        return Err(CaptureError::Failed("compositor announced empty frame".into()));
+    let min_stride = (width as usize)
+        .checked_mul(format.bpp())
+        .ok_or_else(|| CaptureError::Failed("capture width overflows row size".into()))?;
+    let stride_usize = stride as usize;
+    let byte_size = stride_usize
+        .checked_mul(height as usize)
+        .ok_or_else(|| CaptureError::Failed("capture buffer size overflow".into()))?;
+    if byte_size == 0 || width == 0 || height == 0 || stride_usize < min_stride {
+        return Err(CaptureError::Failed("compositor announced invalid frame geometry".into()));
+    }
+    if width > i32::MAX as u32 || height > i32::MAX as u32 || stride > i32::MAX as u32 {
+        return Err(CaptureError::Failed("capture geometry exceeds wl_shm limits".into()));
     }
 
     // Rebuild the pool only when the announced geometry changed.
@@ -79,8 +95,17 @@ pub(crate) fn capture(l: &mut Loop, cache: &mut Option<CopyBuffer>) -> Result<Fr
             (),
         );
         *cache = Some(CopyBuffer { shm_pool, buffer, params: (format, width, height, stride) });
+        l.st.cp_buffer = cache.as_ref().map(|c| c.buffer.clone());
+        l.st.cp_buffer_state = BufferState::Idle;
     }
     let cached = cache.as_mut().expect("just created");
+    if l.st.cp_buffer.as_ref().is_some_and(|b| b == &cached.buffer)
+        && !matches!(l.st.cp_buffer_state, BufferState::Idle | BufferState::Released)
+    {
+        return Err(CaptureError::Failed("capture buffer is still in use".into()));
+    }
+    l.st.cp_buffer = Some(cached.buffer.clone());
+    l.st.cp_buffer_state = BufferState::Submitted;
 
     frame.copy(&cached.buffer);
     l.wait_for(CAPTURE_TIMEOUT, |st| st.cp_ready || st.cp_failed)
@@ -96,6 +121,10 @@ pub(crate) fn capture(l: &mut Loop, cache: &mut Option<CopyBuffer>) -> Result<Fr
     } else {
         src
     };
+    let expected = byte_size;
+    if data.len() < expected {
+        return Err(CaptureError::Failed("capture buffer could not be normalized safely".into()));
+    }
 
     Ok(Frame { width, height, stride, format, data })
 }
@@ -103,11 +132,28 @@ pub(crate) fn capture(l: &mut Loop, cache: &mut Option<CopyBuffer>) -> Result<Fr
 /// Flips rows bottom-up when the compositor announces `Y_INVERT`.
 fn flip_rows(src: &[u8], height: u32, stride: u32) -> Vec<u8> {
     let row = stride as usize;
-    let mut out = vec![0u8; src.len()];
-    for y in 0..height as usize {
-        let s = (height as usize - 1 - y) * row;
-        let d = y * row;
-        out[d..d + row].copy_from_slice(&src[s..s + row]);
+    let rows = height as usize;
+    let Some(required) = row.checked_mul(rows) else {
+        return Vec::new();
+    };
+    if row == 0 || required > src.len() {
+        return Vec::new();
+    }
+    let mut out = vec![0u8; required];
+    for y in 0..rows {
+        let Some(s) = rows.checked_sub(1).and_then(|last| last.checked_sub(y)).and_then(|r| r.checked_mul(row)) else {
+            return Vec::new();
+        };
+        let Some(d) = y.checked_mul(row) else {
+            return Vec::new();
+        };
+        let Some(s_end) = s.checked_add(row) else {
+            return Vec::new();
+        };
+        let Some(d_end) = d.checked_add(row) else {
+            return Vec::new();
+        };
+        out[d..d_end].copy_from_slice(&src[s..s_end]);
     }
     out
 }
@@ -138,10 +184,9 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn flip_rows_rejects_height_beyond_buffer() {
-        // Regression guard: the call site must pass the *row count*, not the
-        // width — a width/height swap panics here instead of corrupting data.
-        flip_rows(&[0u8; 4 * 3], 4, 4);
+    fn flip_rows_rejects_height_beyond_buffer_without_panicking() {
+        // A malformed compositor geometry is rejected rather than indexing
+        // past the mapped bytes; callers convert the empty result to failure.
+        assert!(flip_rows(&[0u8; 4 * 3], 4, 4).is_empty());
     }
 }

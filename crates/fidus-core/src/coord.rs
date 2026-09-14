@@ -87,21 +87,34 @@ pub struct BoundingBox {
 }
 
 impl BoundingBox {
-    /// Width in pixels (always ≥ 0).
+    /// Creates a non-empty, ordered rectangle.
+    pub fn try_new(x0: i64, y0: i64, x1: i64, y1: i64) -> Option<Self> {
+        if x1 <= x0 || y1 <= y0 {
+            return None;
+        }
+        Some(Self { x0, y0, x1, y1 })
+    }
+
+    /// Whether the public fields describe an ordered, non-empty rectangle.
+    pub fn is_valid(&self) -> bool {
+        self.x1 > self.x0 && self.y1 > self.y0
+    }
+
+    /// Width in pixels, saturating instead of wrapping on forged fields.
     pub fn width(&self) -> i64 {
-        (self.x1 - self.x0).max(0)
+        self.x1.saturating_sub(self.x0).max(0)
     }
 
-    /// Height in pixels (always ≥ 0).
+    /// Height in pixels, saturating instead of wrapping on forged fields.
     pub fn height(&self) -> i64 {
-        (self.y1 - self.y0).max(0)
+        self.y1.saturating_sub(self.y0).max(0)
     }
 
-    /// Geometric center of the box.
+    /// Geometric center of the box, computed without integer overflow.
     pub fn center(&self) -> PhysicalPoint {
         PhysicalPoint::new(
-            (self.x0 + self.x1) as f64 / 2.0,
-            (self.y0 + self.y1) as f64 / 2.0,
+            self.x0 as f64 / 2.0 + self.x1 as f64 / 2.0,
+            self.y0 as f64 / 2.0 + self.y1 as f64 / 2.0,
         )
     }
 }
@@ -171,7 +184,14 @@ impl AffineTransform {
     /// platform-supplied position. It is a mathematical unit, not a frame —
     /// and on its own it cannot build a [`crate::frame::CoordinateFrame`],
     /// which requires a [`SolvedMap`].
-    pub const IDENTITY: Self = Self { a: 1.0, b: 0.0, c: 0.0, d: 0.0, e: 1.0, f: 0.0 };
+    pub const IDENTITY: Self = Self {
+        a: 1.0,
+        b: 0.0,
+        c: 0.0,
+        d: 0.0,
+        e: 1.0,
+        f: 0.0,
+    };
 
     /// The six coefficients as `[a, b, c, d, e, f]`.
     ///
@@ -203,7 +223,13 @@ impl AffineTransform {
     /// Fails if the linear part is singular, which cannot happen for a
     /// transform fitted from real screen correspondences.
     pub fn inverse(&self) -> Result<AffineTransform, SolveError> {
+        if !self.coefficients().iter().all(|value| value.is_finite()) {
+            return Err(SolveError::NonFinite);
+        }
         let det = self.a * self.e - self.b * self.d;
+        if !det.is_finite() {
+            return Err(SolveError::NonFinite);
+        }
         if det.abs() < 1e-9 {
             return Err(SolveError::Singular);
         }
@@ -212,14 +238,18 @@ impl AffineTransform {
         let id = -self.d / det;
         let ie = self.a / det;
         // Inverse of [L | t] is [L⁻¹ | -L⁻¹·t].
-        Ok(AffineTransform {
+        let inverse = AffineTransform {
             a: ia,
             b: ib,
             c: -(ia * self.c + ib * self.f),
             d: id,
             e: ie,
             f: -(id * self.c + ie * self.f),
-        })
+        };
+        if !inverse.coefficients().iter().all(|value| value.is_finite()) {
+            return Err(SolveError::NonFinite);
+        }
+        Ok(inverse)
     }
 
     /// Absolute area scale factor of the linear part (`sqrt(|det|)`).
@@ -243,6 +273,13 @@ impl AffineTransform {
         if corr.len() < 3 {
             return Err(SolveError::Degenerate);
         }
+        if corr.iter().any(|(logical, physical)| {
+            ![logical.x, logical.y, physical.x, physical.y]
+                .into_iter()
+                .all(f64::is_finite)
+        }) {
+            return Err(SolveError::NonFinite);
+        }
         // Normal equations for x' = a·x + b·y + c: M·p = q with
         // M = Σ [x² xy x; xy y² y; x y 1], q = Σ [x·x'; y·x'; x'].
         let mut m = [[0.0f64; 3]; 3];
@@ -258,20 +295,56 @@ impl AffineTransform {
                 qy[i] += row[i] * p.y;
             }
         }
+        if !m
+            .iter()
+            .flatten()
+            .chain(qx.iter())
+            .chain(qy.iter())
+            .all(|value| value.is_finite())
+        {
+            return Err(SolveError::NonFinite);
+        }
         let px = solve3(m, qx).ok_or(SolveError::Singular)?;
         let py = solve3(m, qy).ok_or(SolveError::Singular)?;
-        let t = AffineTransform { a: px[0], b: px[1], c: px[2], d: py[0], e: py[1], f: py[2] };
+        let t = AffineTransform {
+            a: px[0],
+            b: px[1],
+            c: px[2],
+            d: py[0],
+            e: py[1],
+            f: py[2],
+        };
+        if !t.coefficients().iter().all(|value| value.is_finite()) {
+            return Err(SolveError::NonFinite);
+        }
 
         let mut sum_sq = 0.0f64;
         let mut max = 0.0f64;
         for (l, p) in corr {
             let got = t.apply(*l);
             let d = got.distance(*p);
+            if !d.is_finite() {
+                return Err(SolveError::NonFinite);
+            }
             sum_sq += d * d;
             max = max.max(d);
         }
+        if !sum_sq.is_finite() {
+            return Err(SolveError::NonFinite);
+        }
         let n = corr.len() as f64;
-        Ok(SolvedMap { map: t, residuals: Residuals { rms: (sum_sq / n).sqrt(), max }, points: corr.len() })
+        let residuals = Residuals {
+            rms: (sum_sq / n).sqrt(),
+            max,
+        };
+        if !residuals.rms.is_finite() || !residuals.max.is_finite() {
+            return Err(SolveError::NonFinite);
+        }
+        Ok(SolvedMap {
+            map: t,
+            residuals,
+            points: corr.len(),
+        })
     }
 
     /// Largest deviation from `other` over the given probe points, evaluated
@@ -379,7 +452,13 @@ fn solve3(m: [[f64; 3]; 3], rhs: [f64; 3]) -> Option<[f64; 3]> {
     let mut b = rhs;
     for col in 0..3 {
         // Partial pivot.
-        let pivot = (col..3).fold(col, |best, r| if a[r][col].abs() > a[best][col].abs() { r } else { best });
+        let pivot = (col..3).fold(col, |best, r| {
+            if a[r][col].abs() > a[best][col].abs() {
+                r
+            } else {
+                best
+            }
+        });
         if a[pivot][col].abs() < 1e-9 {
             return None;
         }
@@ -406,6 +485,9 @@ pub enum SolveError {
     /// Fewer than three correspondences, or all of them collinear.
     #[error("need at least 3 non-collinear correspondences")]
     Degenerate,
+    /// An input or derived affine value was not finite.
+    #[error("affine input or result is non-finite")]
+    NonFinite,
     /// The fitted linear part is singular.
     #[error("affine transform is singular")]
     Singular,

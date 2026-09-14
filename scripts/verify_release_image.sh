@@ -93,8 +93,13 @@ tag="fidus-release-verify-$$"
 cleanup() { docker image rm "$tag" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 zstd -dc "$archive" | docker load >/dev/null
-actual_id=$(docker image inspect fidus-live:debian12 --format '{{.Id}}')
-docker tag fidus-live:debian12 "$tag"
+image_reference=$(python3 - "$manifest" <<'PY'
+import json, pathlib, sys
+print(json.loads(pathlib.Path(sys.argv[1]).read_text())["image"]["reference"])
+PY
+)
+actual_id=$(docker image inspect "$image_reference" --format '{{.Id}}')
+docker tag "$image_reference" "$tag"
 [[ "$actual_id" == "$image_id" ]] || {
   echo "image ID mismatch: expected $image_id, got $actual_id" >&2
   exit 1

@@ -1,6 +1,6 @@
 # 提案 · P4 独立测试子项目 `fidus-test`
 
-> **状态：✅ 已转方案并完成发布收口（2026-09）** — 伪代码级规划见 [`docs/drafts/P4-fidus-test.md`](../drafts/P4-fidus-test.md)，规范已并入 [`docs/spec.md` §8](../spec.md)。CI 协议核心、live-host 协议桥接、本机 live-container 实测和 Debian runtime Release 归档均已完成；Release 资产带 digest、image ID、SHA-256 和离线 smoke 校验。
+> **状态：✅ 已转方案；历史快照仅完成本机实现与候选 Release 归档，当前正式发布未收口（2026-09）** — 伪代码级规划见 [`docs/drafts/P4-fidus-test.md`](../drafts/P4-fidus-test.md)，规范已并入 [`docs/spec.md` §8](../spec.md)。CI 协议核心、live-host 协议桥接、本机 live-container 实测和 Debian runtime 候选归档在该快照中已完成；当前 checked-in 资产不应被视为绑定当前 dirty 工作树，跨机器复现和正式发布仍挂起。
 > 日期：2026-09 · 类型：工程基础设施
 > 本文保留“原始主张 → 全量审核 → 修订后建议”作为审查记录，最终裁决以 §10–§12 和 spec §8 为准。
 

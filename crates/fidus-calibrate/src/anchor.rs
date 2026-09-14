@@ -138,9 +138,14 @@ impl Calibrator for AnchorCalibrator {
         io: &mut dyn CalibrationIo,
     ) -> Result<CoordinateFrame, CalibrationError> {
         let result = self.run(io);
-        // Spec §4.4: teardown on every exit path; idempotent.
-        let _ = io.destroy_projector();
-        result
+        // Spec §4.4: teardown on every exit path; idempotent. A successful
+        // solve must not be reported if the overlay teardown cannot be
+        // confirmed; callers must be able to retry conservatively.
+        let teardown = io.destroy_projector();
+        match (result, teardown) {
+            (Ok(_), Err(error)) => Err(error.into()),
+            (result, _) => result,
+        }
     }
 }
 
@@ -159,8 +164,49 @@ struct Measured {
 }
 
 impl AnchorCalibrator {
+    fn validate_config(cfg: &AnchorConfig) -> Result<(), CalibrationError> {
+        for (name, value) in [
+            ("marker_size_logical", cfg.marker_size_logical),
+            ("edge_padding", cfg.edge_padding),
+            ("jitter_px", cfg.jitter_px),
+            ("residual_tolerance_px", cfg.residual_tolerance_px),
+            ("rectangle_tolerance_px", cfg.rectangle_tolerance_px),
+            ("verification_tolerance_px", cfg.verification_tolerance_px),
+            ("consistency_tolerance_px", cfg.consistency_tolerance_px),
+        ] {
+            if !value.is_finite() || value < 0.0 {
+                return Err(CalibrationError::InvalidConfiguration(format!(
+                    "{name} must be finite and non-negative"
+                )));
+            }
+        }
+        if cfg.marker_size_logical <= 0.0
+            || !cfg.scale_range.0.is_finite()
+            || !cfg.scale_range.1.is_finite()
+            || cfg.scale_range.0 <= 0.0
+            || cfg.scale_range.0 > cfg.scale_range.1
+            || cfg.passes == 0
+            || cfg.retries == 0
+            || cfg.verification_positions == 0
+        {
+            return Err(CalibrationError::InvalidConfiguration(
+                "invalid scale range, marker size, or zero calibration count".into(),
+            ));
+        }
+        let positions = cfg.verification_positions.min(4);
+        let work = cfg.passes
+            .checked_mul(cfg.retries)
+            .and_then(|n| n.checked_mul(4usize.checked_add(positions)?))
+            .ok_or_else(|| CalibrationError::InvalidConfiguration("calibration work budget overflow".into()))?;
+        if work > 1_000_000 {
+            return Err(CalibrationError::InvalidConfiguration("calibration work budget is too large".into()));
+        }
+        Ok(())
+    }
+
     fn run(&mut self, io: &mut dyn CalibrationIo) -> Result<CoordinateFrame, CalibrationError> {
         let cfg = self.config.clone();
+        Self::validate_config(&cfg)?;
         let (uw, uh) = io.usable_size_hint()?;
         let marker = cfg.marker_size_logical;
 
@@ -175,6 +221,23 @@ impl AnchorCalibrator {
             Some(s) => Rng::seed_from(s),
             None => Rng::seed_from_clock(0xA0_u64.rotate_left(32) ^ marker.to_bits()),
         };
+
+        // A zero-pass result has no measured map and would panic below; more
+        // importantly, it would make an unverified calibration look successful.
+        if cfg.passes == 0 {
+            return Err(CalibrationError::AccuracyBelowThreshold {
+                measured: 0.0,
+                tolerance: 0.0,
+                stage: "passes must be greater than zero",
+            });
+        }
+        if cfg.verification_positions == 0 {
+            return Err(CalibrationError::AccuracyBelowThreshold {
+                measured: 0.0,
+                tolerance: 0.0,
+                stage: "verification requires at least one position",
+            });
+        }
 
         let mut solutions: Vec<PassSolution> = Vec::with_capacity(cfg.passes);
         for _ in 0..cfg.passes {
@@ -191,9 +254,14 @@ impl AnchorCalibrator {
             LogicalPoint::new(uw, uh),
             LogicalPoint::new(uw / 2.0, uh / 2.0),
         ];
+        // Every pass must agree; checking only the endpoints can hide a bad
+        // middle pass when three or more passes are configured.
         let first = &solutions[0];
-        let last = &solutions[solutions.len() - 1];
-        let consistency = first.map.map().max_difference(&last.map.map(), &probes);
+        let consistency = solutions
+            .iter()
+            .skip(1)
+            .map(|solution| first.map.map().max_difference(&solution.map.map(), &probes))
+            .fold(0.0, f64::max);
         if consistency > cfg.consistency_tolerance_px {
             return Err(CalibrationError::Inconsistent {
                 detail: format!(
@@ -267,8 +335,22 @@ impl AnchorCalibrator {
         let mut verify_max = 0.0f64;
         let mut capture_size = measured.capture_size;
         let n_verify = cfg.verification_positions.min(cfg.colors.len());
+        if n_verify == 0 {
+            return Err(CalibrationError::AccuracyBelowThreshold {
+                measured: 0.0,
+                tolerance: 0.0,
+                stage: "verification requires at least one position",
+            });
+        }
         if n_verify > 0 {
             let positions = interior_positions(rng, &cfg, uw, uh, n_verify);
+            if positions.len() < n_verify {
+                return Err(CalibrationError::AccuracyBelowThreshold {
+                    measured: positions.len() as f64,
+                    tolerance: n_verify as f64,
+                    stage: "insufficient verification positions",
+                });
+            }
             let verified = self.measure(io, rng, &positions)?;
             capture_size = verified.capture_size;
             for (center, detected) in &verified.correspondences {
@@ -418,8 +500,9 @@ fn interior_positions(rng: &mut Rng, cfg: &AnchorConfig, uw: f64, uh: f64, n: us
     out
 }
 
-/// Rectangle constraint: the four detected centers must form a rectangle
-/// — diagonals bisect each other (parallelogram) *and* are equally long.
+/// Affine rectangle constraint: the four detected centers must form a
+/// parallelogram (diagonals bisect each other). General affine maps can shear
+/// or non-uniformly scale the rectangle, so equal diagonal lengths are invalid.
 /// `corr` is ordered [TL, TR, BL, BR] by construction.
 fn check_rectangle(
     corr: &[(LogicalPoint, PhysicalPoint)],
@@ -430,15 +513,34 @@ fn check_rectangle(
     let mid = |a: PhysicalPoint, b: PhysicalPoint| {
         PhysicalPoint::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0)
     };
-    let (diag1, diag2) = (tl.distance(br), tr.distance(bl));
+    // Affine transforms preserve parallelism and midpoint bisection, but not
+    // diagonal lengths (shear and non-uniform scale are valid here).
     let midpoint_gap = mid(tl, br).distance(mid(tr, bl));
-    let diag_gap = (diag1 - diag2).abs();
-    if diag1 < 1.0 || midpoint_gap > tolerance || diag_gap > tolerance {
+    let edge_x = tl.distance(tr).min(bl.distance(br));
+    let edge_y = tl.distance(bl).min(tr.distance(br));
+    if midpoint_gap > tolerance || edge_x < 1.0 || edge_y < 1.0 {
         return Err(CalibrationError::Inconsistent {
             detail: format!(
-                "detected corners violate the rectangle constraint: midpoint gap {midpoint_gap:.2} px, diagonal gap {diag_gap:.2} px"
+                "detected corners violate the affine rectangle constraint: midpoint gap {midpoint_gap:.2} px, edges {edge_x:.2}/{edge_y:.2} px"
             ),
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::check_rectangle;
+    use fidus_core::coord::{LogicalPoint, PhysicalPoint};
+
+    #[test]
+    fn affine_shear_does_not_require_equal_diagonals() {
+        let corr = vec![
+            (LogicalPoint::new(0.0, 0.0), PhysicalPoint::new(0.0, 0.0)),
+            (LogicalPoint::new(100.0, 0.0), PhysicalPoint::new(100.0, 0.0)),
+            (LogicalPoint::new(0.0, 100.0), PhysicalPoint::new(50.0, 100.0)),
+            (LogicalPoint::new(100.0, 100.0), PhysicalPoint::new(150.0, 100.0)),
+        ];
+        check_rectangle(&corr, 0.01).expect("sheared affine image is valid");
+    }
 }
