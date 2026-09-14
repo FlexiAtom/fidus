@@ -36,6 +36,8 @@
 
 ### 2.2 正在进行的草案/方案
 
+- **核心库完全体收口与边界硬化**：草案位于 `docs/drafts/complete-state-hardening.md`，当前待全审；WP-A–G 只定义接口、失效模式、无显示验收和发布边界，未授权直接实现。
+
 | 项目 | 当前阶段 | 依据 | 当前边界 |
 |---|---|---|---|
 | P5 output mutation/recovery | 无显示实现级门槛已完成；真实异常证据挂起 | `docs/spec.md §8.7`、`docs/drafts/P5-output-mutation-recovery.md` | 当前只剩用户明确授权下的真实 compositor/宿主异常实验；稳定 identity 在当前 Niri 上不可证明，NameOnly 不得 confirmed |
@@ -105,7 +107,7 @@ P5 的实现工作完成后，下一阶段不是立即发布，而是对整个�
 
 1. **保持 P5 无显示回归全绿**：F1–F42 逐项映射见 `docs/measurements/p5-f1-f42-matrix.md`；当前 real-pending 项不得伪造为 pass。
 2. **保持 exit-code/summary 语义一致**：`not_requested | confirmed | unverified`、recovery code 4、child/timeout/external-change 和唯一 summary 已由 runner fake 回归覆盖。
-3. **全量审查已完成（有条件通过）**：审查记录见 `docs/review-process.md` §6；当前提交级和本机工具链门禁已通过，仍需完成下列本地收口项，不能宣称项目完全收口。
+3. **全量审查完成（有条件通过／未收口）**：当前 HEAD 的复盘见 `docs/review-process.md` §8。本轮已修复 fidus-test 协议值边界、summary 一致性、checked_add、malformed public record 索引和 wrapper failed summary 退出语义；Fused 置信度、Wayland buffer release、非有限输入/坏 Frame、Anchor 多轮/一般 affine、runner escaped session/partial apply/TOCTOU/锁清理/mount 输入/信号竞态仍是开放高风险项。
 4. **供应链与离线门禁**：vendor 离线 CI、声明式 SPDX SBOM、OpenPGP signature 与 SLSA provenance attestation 已实现并通过本机验证；签名是本机发布者密钥，不等于外部 CI 身份。
 5. **下一轮候选**：修正发布产物与当前 source revision 的绑定，补 registry manifest/跨机器验证；评估是否把经典壁纸纳入不含外部版权素材的可复现合成测试；shellcheck 仅在工具纳入 CI 后执行。
    - 本轮已裁决并实现：不引入图片依赖、不读取外部壁纸，采用 `tools/generate_test_images.py` 生成 fractal/texture/gradient/periodic 四类 RGB PNG，并以 `tests/fixtures/images/manifest.json` 登记尺寸与 SHA-256；`tools/test_generate_test_images.py` 已接入 `scripts/ci_fidus_test.sh` 无显示门禁。

@@ -116,6 +116,22 @@ next_step: 合成图片 fixture 已接入无显示门禁；当前 HEAD=2d88f6926
 
 本次全量审查结论为**有条件通过／未收口**：当前代码和文档修复已通过本机可执行门禁，但不能宣称 P5 完整完成或跨机器验证完成。剩余 real-pending 项和发布 provenance/SBOM/signature 等发布增强项必须保持明确边界。
 
+## 8. 当前 HEAD 全量审查复盘
+
+```text
+review_level: full
+reviewer: 主代理 + 并行只读代码/规范/测试/发布审查
+input_revision: e7d175815e4e54beb5f0b45741e0f505e5852279 + protocol hardening working tree
+previous_decision: conditional
+decision: conditional
+skipped_checks: 真实 compositor buffer release 与异常 recovery；跨机器发布验证；shellcheck；P5 runner escaped session/TOCTOU/lock cleanup/mount 保留字符；Fused 端到端；本轮修复后的完整 workspace test 在首次审查时未能独立复现，后续定向 fidus-test 通过
+findings: 当前 HEAD 的既有全量审查记录曾绑定旧 revision；spec §11.6、proposal 历史段、draft 决策表仍有状态口径漂移；F42 的 pass 需要明确 fixture 与真实证据边界；发现 Fused 绕过 ambiguous-template confidence ceiling、Wayland buffer release 缺失、一般 affine 被错误按等对角线约束、非有限/坏 Frame 输入可传播 NaN 或 panic、公开 Fused 参数可触发 clamp panic、Anchor 多轮只比较首尾，以及 P5 runner escaped session/partial apply/TOCTOU/lock cleanup/mount 输入/信号竞态等风险。已修复 fidus-test value ASCII 边界、malformed public record 索引 panic、summary counts/status 一致性、checked_add 溢出和 live wrapper 忽略 failed summary；这些修复尚需纳入后续完整 workspace 回归。
+verification: env -u WAYLAND_DISPLAY -u DISPLAY -u XDG_RUNTIME_DIR CARGO_HOME=/tmp/fidus-cargo-p5 CARGO_TARGET_DIR=/tmp/fidus-target-p5 bash scripts/ci_fidus_test.sh 通过；定向 cargo test --locked --offline --config .cargo/config.ci.toml -p fidus-test 通过（37 tests）；P5_MATRIX pass=34 real_pending=8 blocked=0；SBOM_OK packages=38 relationships=103；deterministic image fixtures: 4 verified；bash -n scripts/*.sh 与 git diff --check 通过；当前旧发布 manifest 的 source binding 校验按预期失败，未将旧签名升级为当前 HEAD 证明
+next_step: 先修复并为上述高风险代码路径补无显示回归；再更新 spec §11/提案/草案历史状态标记；然后在干净、当前 revision 上重建并签名发布物，最后进行跨机器验证；真实桌面异常验证仍需明确授权
+```
+
+当前 HEAD 的完成度判定仍为**有条件通过／未收口**。F1–F42 无显示证据为 `34/42 = 81.0%`；P5 方案、最小 runner、协议和无显示回归已完成记录，但真实异常/稳定 identity/跨 compositor 仍未完成。发布归档曾可重建候选，但当前正式仓库发布文件的 source binding/signature 闭环未由本轮最终验证确认。项目整体按“可继续开发但不可宣称发布收口”处理。
+
 ## 7. 审查记录要求
 
 每次对提案执行快审或全审，至少记录：
