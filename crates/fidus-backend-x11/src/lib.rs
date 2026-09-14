@@ -38,6 +38,18 @@ use x11rb::protocol::xproto::{
 };
 use x11rb::rust_connection::RustConnection;
 
+fn validate_marker_geometry(pos: LogicalPoint, size: f64) -> Result<(i16, i16, u16), MarkerError> {
+    if !size.is_finite() || size <= 0.0 || size.ceil() > u16::MAX as f64 { return Err(MarkerError::Backend("marker geometry exceeds X11 limits".into())); }
+    let (x, y) = (pos.x.round(), pos.y.round());
+    if !x.is_finite() || !y.is_finite() || x < i16::MIN as f64 || x > i16::MAX as f64 || y < i16::MIN as f64 || y > i16::MAX as f64 { return Err(MarkerError::Backend("marker coordinate exceeds X11 limits".into())); }
+    Ok((x as i16, y as i16, size.ceil() as u16))
+}
+
+fn validate_capture_geometry(w: u32, h: u32) -> Result<usize, CaptureError> {
+    if w == 0 || h == 0 || w > u16::MAX as u32 || h > u16::MAX as u32 { return Err(CaptureError::Backend("X11 capture geometry is outside protocol limits".into())); }
+    (w as usize).checked_mul(h as usize).and_then(|n| n.checked_mul(4)).ok_or_else(|| CaptureError::Backend("X11 capture buffer size overflow".into()))
+}
+
 /// The connected backend: one X connection, the root window, and the
 /// projector's marker windows.
 pub struct X11Backend {
@@ -169,21 +181,7 @@ impl X11Backend {
         let screen = self.screen();
         let (root, depth) = (screen.root, screen.root_depth);
         for (pos, style) in marks {
-            if !style.size_logical.is_finite() || style.size_logical <= 0.0 {
-                return Err(MarkerError::Backend("marker size must be finite and positive".into()));
-            }
-            let size_f = style.size_logical.ceil();
-            if size_f > u16::MAX as f64 {
-                return Err(MarkerError::Backend("marker size exceeds X11 limits".into()));
-            }
-            let x_f = pos.x.round();
-            let y_f = pos.y.round();
-            if !x_f.is_finite() || !y_f.is_finite() || x_f < i16::MIN as f64 || x_f > i16::MAX as f64 || y_f < i16::MIN as f64 || y_f > i16::MAX as f64 {
-                return Err(MarkerError::Backend("marker coordinate exceeds X11 limits".into()));
-            }
-            let size = size_f as u16;
-            let x = x_f as i16;
-            let y = y_f as i16;
+            let (x, y, size) = validate_marker_geometry(*pos, style.size_logical)?;
             let pixel = self.pixel_of(style.rgba)?;
             let window = self
                 .conn
@@ -223,9 +221,7 @@ impl X11Backend {
     fn get_root_image(&self, size: Option<(u32, u32)>) -> Result<Frame, CaptureError> {
         let screen = self.screen();
         let (w, h) = size.unwrap_or(self.root_size);
-        if w == 0 || h == 0 || w > u16::MAX as u32 || h > u16::MAX as u32 {
-            return Err(CaptureError::Backend("X11 capture geometry is outside protocol limits".into()));
-        }
+        let needed = validate_capture_geometry(w, h)?;
         let reply = self
             .conn
             .get_image(ImageFormat::Z_PIXMAP, screen.root, 0, 0, w as u16, h as u16, !0)
@@ -245,11 +241,7 @@ impl X11Backend {
                 px.reverse();
             }
         }
-        let Some(needed) = (w as usize)
-            .checked_mul(h as usize)
-            .and_then(|n| n.checked_mul(4)) else {
-            return Err(CaptureError::Backend("X11 capture buffer size overflow".into()));
-        };
+
         if data.len() < needed {
             return Err(CaptureError::Backend("truncated GetImage reply".into()));
         }
@@ -347,5 +339,26 @@ impl X11Backend {
             )));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{validate_capture_geometry, validate_marker_geometry};
+    use fidus_core::coord::LogicalPoint;
+
+    #[test]
+    fn marker_geometry_rejects_non_finite_and_protocol_overflow() {
+        assert!(validate_marker_geometry(LogicalPoint::new(f64::NAN, 1.0), 8.0).is_err());
+        assert!(validate_marker_geometry(LogicalPoint::new(1.0, 1.0), f64::INFINITY).is_err());
+        assert!(validate_marker_geometry(LogicalPoint::new(i16::MAX as f64 + 1.0, 0.0), 8.0).is_err());
+        assert!(validate_marker_geometry(LogicalPoint::new(0.0, 0.0), u16::MAX as f64 + 1.0).is_err());
+    }
+
+    #[test]
+    fn capture_geometry_rejects_zero_protocol_overflow_and_accepts_small() {
+        assert!(validate_capture_geometry(0, 1).is_err());
+        assert!(validate_capture_geometry(u16::MAX as u32 + 1, 1).is_err());
+        assert_eq!(validate_capture_geometry(2, 3).unwrap(), 24);
     }
 }

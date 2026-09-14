@@ -18,12 +18,24 @@ if None in ids or len(ids) != len(doc['packages']): raise SystemExit('duplicate 
 for r in doc.get('relationships', []):
     if r.get('spdxElementId') not in ids | {'SPDXRef-DOCUMENT'} or r.get('relatedSpdxElement') not in ids: raise SystemExit('relationship references unknown package')
 if 'NOASSERTION' not in sbom.read_text(): raise SystemExit('SBOM must state unresolved offline metadata explicitly')
-# Rebuild to a temporary file and compare package names: generator is deterministic except creation time.
+# Rebuild and compare all reproducible package metadata. Creation time is
+# intentionally variable, but names alone are too weak: a stale version or
+# source can otherwise pass verification while describing another dependency.
 import subprocess, tempfile
 with tempfile.NamedTemporaryFile() as f:
     generator = docker.parent / 'scripts' / 'generate_sbom.py'
     subprocess.run([sys.executable, str(generator), '--lock', str(lock), '--dockerfile', str(docker), '--output', f.name], check=True)
     generated=json.loads(pathlib.Path(f.name).read_text())
-if {p['name'] for p in generated['packages']} != {p['name'] for p in doc['packages']}: raise SystemExit('SBOM package set is stale')
+def package_signature(p):
+    checksums=tuple(sorted((c.get('algorithm'), c.get('checksumValue')) for c in p.get('checksums', [])))
+    return (p.get('SPDXID'), p.get('name'), p.get('versionInfo'), p.get('downloadLocation'), checksums)
+actual={package_signature(p) for p in doc['packages']}
+expected={package_signature(p) for p in generated['packages']}
+if actual != expected:
+    raise SystemExit('SBOM package metadata is stale (name/version/source/checksum mismatch)')
+actual_rel={(r.get('spdxElementId'), r.get('relationshipType'), r.get('relatedSpdxElement')) for r in doc['relationships']}
+expected_rel={(r.get('spdxElementId'), r.get('relationshipType'), r.get('relatedSpdxElement')) for r in generated['relationships']}
+if actual_rel != expected_rel:
+    raise SystemExit('SBOM dependency relationships are stale')
 print(f'SBOM_OK packages={len(doc["packages"])} relationships={len(doc["relationships"])}')
 PY

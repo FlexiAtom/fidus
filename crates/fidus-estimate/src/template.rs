@@ -44,6 +44,8 @@ pub struct SearchRoi {
 /// guard must reject, not fabricate (project convention 4). 0.25 ≈ (0.5
 /// luma LSB)², i.e. strictly below anything a real 8-bit image can show.
 const MIN_VARIANCE_PER_SAMPLE: f64 = 0.25;
+/// Bound caller-controlled full-screen/coarse scan work in no-display mode.
+const MAX_SEARCH_POSITIONS: u64 = 16_000_000;
 
 /// Downsampling factor of the coarse pyramid level.
 const COARSE_STEP: u32 = 3;
@@ -434,6 +436,11 @@ pub fn match_template(frame: &Frame, template: &RgbaImage, roi: SearchRoi) -> Op
     {
         return None;
     }
+    let span = (roi.half * 2.0).ceil() as u64;
+    let search_positions = span.checked_add(1).and_then(|n| n.checked_mul(n));
+    if search_positions.is_none_or(|n| n > MAX_SEARCH_POSITIONS) {
+        return None;
+    }
 
     let fine_tpl = SampledTemplate::build(template, 1);
     // A featureless template cannot be located; say so rather than return
@@ -626,6 +633,17 @@ mod tests {
         for center in [(f64::NAN, 48.0), (68.0, f64::INFINITY)] {
             assert!(match_template(&f, &tpl, SearchRoi { center, half: 40.0 }).is_none());
         }
+    }
+
+    #[test]
+    fn oversized_roi_is_refused_before_scanning() {
+        let f = frame_with_patch(60, 40, 16, 16);
+        let tpl = patch_template(16, 16);
+        assert!(match_template(
+            &f,
+            &tpl,
+            SearchRoi { center: (68.0, 48.0), half: 10_000.0 },
+        ).is_none());
     }
 
     #[test]

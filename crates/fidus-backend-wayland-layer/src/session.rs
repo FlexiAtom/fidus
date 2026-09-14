@@ -83,6 +83,13 @@ pub(crate) enum BufferState {
     Destroyed,
 }
 
+impl BufferState {
+    pub(crate) fn may_reuse(self) -> bool {
+        matches!(self, Self::Idle | Self::Released)
+    }
+
+}
+
 impl Session {
     pub(crate) fn new(qh: QueueHandle<Session>) -> Self {
         Session {
@@ -426,14 +433,22 @@ mod tests {
 
     #[test]
     fn ready_is_not_reusable_without_release() {
-        assert_ne!(BufferState::Ready, BufferState::Released);
-        assert!(!matches!(BufferState::Ready, BufferState::Idle | BufferState::Released));
+        assert!(!BufferState::Ready.may_reuse());
+        assert!(!BufferState::Ready.may_reuse());
     }
 
     #[test]
     fn failed_and_submitted_are_not_reusable() {
-        for state in [BufferState::Submitted, BufferState::Failed, BufferState::Destroyed] {
-            assert!(!matches!(state, BufferState::Idle | BufferState::Released));
-        }
+        assert!(!BufferState::Submitted.may_reuse());
+        assert!(!BufferState::Failed.may_reuse());
+        assert!(!BufferState::Failed.may_reuse());
+        assert!(!BufferState::Destroyed.may_reuse());
+    }
+
+    #[test]
+    fn release_is_the_reuse_boundary() {
+        assert!(BufferState::Idle.may_reuse());
+        assert!(BufferState::Released.may_reuse());
+        assert!(!BufferState::Submitted.may_reuse());
     }
 }

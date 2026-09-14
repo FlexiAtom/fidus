@@ -263,7 +263,7 @@ fn attach_and_settle(
         let buffers = projector.buffers.as_ref().expect("buffers allocated");
         let buf = if marker_visible { &buffers.marker } else { &buffers.clear };
         let state = if marker_visible { l.st.marker_buffer_state } else { l.st.clear_buffer_state };
-        if !matches!(state, BufferState::Idle | BufferState::Released) {
+        if !state.may_reuse() {
             return Err(MarkerError::Backend("marker buffer is still in use".into()));
         }
         if marker_visible {
@@ -332,8 +332,7 @@ fn ensure_buffers(
         if b.size == size && b.rgba == style.rgba {
             return Ok(());
         }
-        if !matches!(l.st.marker_buffer_state, BufferState::Idle | BufferState::Released)
-            || !matches!(l.st.clear_buffer_state, BufferState::Idle | BufferState::Released)
+        if !l.st.marker_buffer_state.may_reuse() || !l.st.clear_buffer_state.may_reuse()
         {
             return Err(MarkerError::Backend(
                 "cannot replace marker buffers before wl_buffer.release".into(),
