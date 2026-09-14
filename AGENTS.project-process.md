@@ -108,6 +108,9 @@ P5 的实现工作完成后，下一阶段不是立即发布，而是对整个�
 3. **全量审查已完成（有条件通过）**：审查记录见 `docs/review-process.md` §6；当前提交级和本机工具链门禁已通过，仍需完成下列本地收口项，不能宣称项目完全收口。
 4. **供应链与离线门禁**：vendor 离线 CI、声明式 SPDX SBOM、OpenPGP signature 与 SLSA provenance attestation 已实现并通过本机验证；签名是本机发布者密钥，不等于外部 CI 身份。
 5. **下一轮候选**：修正发布产物与当前 source revision 的绑定，补 registry manifest/跨机器验证；评估是否把经典壁纸纳入不含外部版权素材的可复现合成测试；shellcheck 仅在工具纳入 CI 后执行。
+   - 本轮已裁决并实现：不引入图片依赖、不读取外部壁纸，采用 `tools/generate_test_images.py` 生成 fractal/texture/gradient/periodic 四类 RGB PNG，并以 `tests/fixtures/images/manifest.json` 登记尺寸与 SHA-256；`tools/test_generate_test_images.py` 已接入 `scripts/ci_fidus_test.sh` 无显示门禁。
+   - 实际证据：`python3 tools/test_generate_test_images.py`（4 fixtures verified）、Python 语法检查和 `git diff --check` 通过。未宣称 workspace Rust 全量验证，本轮新增范围仅为 Python fixture 回归。
+- 发布重绑定当前状态：Docker 构建因 sandbox 无法创建 bridge veth 失败，未生成新镜像/归档；旧发布 manifest 仍绑定旧 revision，不得修改为当前 HEAD。
 6. **处理挂起事项**：只有获得适当环境和明确授权后，分别恢复跨机器发布验证与真实桌面错误处理单点验证。
 7. **审查通过后再决定发布**：push 或发布仍需单独确认，不因全量审查有条件通过而自动执行。
 

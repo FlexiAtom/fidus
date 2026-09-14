@@ -1,0 +1,35 @@
+{
+  "format": "png-rgb8",
+  "seed": 990469,
+  "generator": "tools/generate_test_images.py",
+  "images": [
+    {
+      "name": "fractal",
+      "path": "tests/fixtures/images/fractal.png",
+      "width": 128,
+      "height": 96,
+      "sha256": "370f614aebb16bc1fdd4cfa09126e299952c17e9566bc66349bbe4aa5f8d4a8c"
+    },
+    {
+      "name": "texture",
+      "path": "tests/fixtures/images/texture.png",
+      "width": 128,
+      "height": 96,
+      "sha256": "6fc88c0e6ddebbd943ad1430f8270da916c257d283c45f82b050e27cd02bad89"
+    },
+    {
+      "name": "gradient",
+      "path": "tests/fixtures/images/gradient.png",
+      "width": 128,
+      "height": 96,
+      "sha256": "f050afd19a56e9fcf17855468640dbb520d9a1a2816bef9218490083a84670ec"
+    },
+    {
+      "name": "periodic",
+      "path": "tests/fixtures/images/periodic.png",
+      "width": 128,
+      "height": 96,
+      "sha256": "067ea6d96fa0528a31253dd5a874f251808fac1628e552a8bf3ddd6963456a8b"
+    }
+  ]
+}

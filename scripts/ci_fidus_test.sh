@@ -40,6 +40,7 @@ bash scripts/check_p5_matrix.sh
 bash scripts/test_output_mutation_runner.sh
 bash scripts/test_ci_offline_contract.sh
 bash scripts/verify_sbom.sh
+python3 tools/test_generate_test_images.py
 # The live-container contract's positive path requires a real display socket;
 # keep it out of deterministic no-display CI and run it in its dedicated job.
 cargo test "${cargo_args[@]}" --workspace
