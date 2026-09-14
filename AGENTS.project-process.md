@@ -110,7 +110,7 @@ P5 的实现工作完成后，下一阶段不是立即发布，而是对整个�
 5. **下一轮候选**：修正发布产物与当前 source revision 的绑定，补 registry manifest/跨机器验证；评估是否把经典壁纸纳入不含外部版权素材的可复现合成测试；shellcheck 仅在工具纳入 CI 后执行。
    - 本轮已裁决并实现：不引入图片依赖、不读取外部壁纸，采用 `tools/generate_test_images.py` 生成 fractal/texture/gradient/periodic 四类 RGB PNG，并以 `tests/fixtures/images/manifest.json` 登记尺寸与 SHA-256；`tools/test_generate_test_images.py` 已接入 `scripts/ci_fidus_test.sh` 无显示门禁。
    - 实际证据：`python3 tools/test_generate_test_images.py`（4 fixtures verified）、Python 语法检查和 `git diff --check` 通过。未宣称 workspace Rust 全量验证，本轮新增范围仅为 Python fixture 回归。
-- 发布重绑定当前状态：已实现 `scripts/source_revision.py` 与隔离输出的 `scripts/build_release.sh`；Docker 构建因 sandbox 无法创建 bridge veth 失败，未生成当前 revision 的正式归档/manifest，旧发布 manifest 仍绑定旧 revision，不得修改为当前 HEAD。
+- 发布重绑定当前状态：已实现 `scripts/source_revision.py` 与隔离输出的 `scripts/build_release.sh`；当前 HEAD 已完成镜像重建、归档、source binding、OpenPGP 签名和 provenance 验证，旧 revision 不再作为当前发布声明。
 6. **处理挂起事项**：只有获得适当环境和明确授权后，分别恢复跨机器发布验证与真实桌面错误处理单点验证。
 7. **审查通过后再决定发布**：push 或发布仍需单独确认，不因全量审查有条件通过而自动执行。
 
