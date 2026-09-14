@@ -31,7 +31,7 @@
 - P5 output mutation/recovery 已完成提案、草案全审和方案冻结，方案位于 `docs/spec.md §8.7`。
 - P5 已有最小、显式授权的 `scripts/output_mutation_runner.sh`，默认入口不会调用它。
 - `scripts/test_output_mutation_runner.sh` 使用 fake Niri 做无显示回归。
-- `fidus-test` 的 P5 fake/fixture 测试已通过；workspace test、clippy、doc、shell 语法和 diff 检查已有通过记录。
+- `fidus-test` 的 P5 fake/fixture 测试已通过；vendor 驱动的 workspace test、clippy、doc、shell 语法、离线契约、SBOM 和 diff 检查已有通过记录。
 - 当前 Niri 只有 NameOnly 身份证据；即使字段恢复一致，也不得报告 `recovery=confirmed`。
 
 ### 2.2 正在进行的草案/方案
@@ -106,9 +106,10 @@ P5 的实现工作完成后，下一阶段不是立即发布，而是对整个�
 1. **保持 P5 无显示回归全绿**：F1–F42 逐项映射见 `docs/measurements/p5-f1-f42-matrix.md`；当前 real-pending 项不得伪造为 pass。
 2. **保持 exit-code/summary 语义一致**：`not_requested | confirmed | unverified`、recovery code 4、child/timeout/external-change 和唯一 summary 已由 runner fake 回归覆盖。
 3. **全量审查已完成（有条件通过）**：审查记录见 `docs/review-process.md` §6；当前提交级和本机工具链门禁已通过，仍需完成下列本地收口项，不能宣称项目完全收口。
-4. **后续本地收口**：已补 runner 原子 lock/path 安全、后代进程确认、`ResultRecord` 防 panic，并加入机器可读 F1–F42 校验、无显示 runner 回归、vendor 离线 CI、声明式 SPDX SBOM、OpenPGP signature 与 SLSA provenance attestation；当前提交级验证已通过，registry manifest 与跨机器验证仍挂起。
-5. **处理挂起事项**：只有获得适当环境和明确授权后，分别恢复跨机器发布验证与真实桌面错误处理单点验证。
-6. **审查通过后再决定发布**：push 或发布仍需单独确认，不因全量审查有条件通过而自动执行。
+4. **供应链与离线门禁**：vendor 离线 CI、声明式 SPDX SBOM、OpenPGP signature 与 SLSA provenance attestation 已实现并通过本机验证；签名是本机发布者密钥，不等于外部 CI 身份。
+5. **下一轮候选**：修正发布产物与当前 source revision 的绑定，补 registry manifest/跨机器验证；评估是否把经典壁纸纳入不含外部版权素材的可复现合成测试；shellcheck 仅在工具纳入 CI 后执行。
+6. **处理挂起事项**：只有获得适当环境和明确授权后，分别恢复跨机器发布验证与真实桌面错误处理单点验证。
+7. **审查通过后再决定发布**：push 或发布仍需单独确认，不因全量审查有条件通过而自动执行。
 
 ## 5. 任务变更规则
 
