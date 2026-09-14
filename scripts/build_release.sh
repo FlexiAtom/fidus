@@ -49,5 +49,6 @@ pathlib.Path(out).write_text(json.dumps({
 PY
 printf '%s  %s\n' "$archive_sha256" "fidus-live-debian12.tar.zst" > "$tmp/fidus-live-debian12.tar.zst.sha256"
 cp "$tmp"/fidus-live-debian12.tar.zst* "$out/"
+printf '%s\n' "$image_id" > "$out/fidus-live-debian12.image-id"
 cp "$tmp/fidus-live-debian12.manifest.json" "$out/"
 printf 'rebuilt output=%s source=%s image=%s\n' "$out" "$commit" "$image_id"
