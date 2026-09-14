@@ -109,8 +109,8 @@ input_revision: fbb2fae + release verification follow-up
 previous_decision: conditional (initial full review)
 decision: conditional
 skipped_checks: 真实桌面错误处理单点验证（用户要求挂起）；跨机器发布验证（项目级挂起）；shellcheck（环境未安装）；真实 compositor 异常注入
-findings: 初审发现的 trailing whitespace、P5 历史状态漂移、F1-F42 映射缺失、runner timeout/外部修改/summary/recovery 缺口、wrapper correlation 缺口和未知 mode 回退已修复；P3 方向状态、P4 重复候选章节、根 README P4/P5 缺项和相关历史表述已标注/同步；F1/F8/F16/F21/F28/F30/F33/F38 与两项项目级验证保持 real-pending；已提供初版本地 release manifest；SBOM/signature/attestation/registry manifest 仍未提供
-verification: cargo test --locked --workspace、cargo clippy --locked --workspace --all-targets -- -D warnings、cargo doc --locked --workspace --no-deps、bash -n scripts/*.sh、bash scripts/check_p5_matrix.sh、bash scripts/test_output_mutation_runner.sh、git diff --check 全部通过；Rust 使用已恢复依赖的 CARGO_HOME=/tmp/fidus-cargo-p5、CARGO_TARGET_DIR=/tmp/fidus-target-p5；矩阵输出 pass=34、real_pending=8；发布 manifest 与归档 hash/size/image ID 已绑定校验
+findings: 初审发现的 trailing whitespace、P5 历史状态漂移、F1-F42 映射缺失、runner timeout/外部修改/summary/recovery 缺口、wrapper correlation 缺口和未知 mode 回退已修复；P3 方向状态、P4 重复候选章节、根 README P4/P5 缺项和相关历史表述已标注/同步；F1/F8/F16/F21/F28/F30/F33/F38 与两项项目级验证保持 real-pending；已提供本地 release manifest、声明式 SPDX SBOM、OpenPGP detached signature 与 SLSA v1 provenance attestation；签名使用本机发布者密钥并已本地验证；registry manifest 与跨机器验证仍未提供
+verification: vendor 驱动的 bash scripts/ci_fidus_test.sh 全部通过（含 cargo metadata/test/clippy/doc、offline contract、SBOM 校验、runner 回归）；bash -n scripts/*.sh、git diff --check、两份 OpenPGP detached signature 验证通过；SBOM_OK packages=38 relationships=103；矩阵输出 pass=34、real_pending=8；发布 manifest 与归档 hash/size/image ID/SBOM 已绑定校验；使用 vendor/ 与 .cargo/config.ci.toml，Rust target 为 /tmp/fidus-target-p5
 next_step: 本轮本地收口已提交；直接 Rust workspace test/clippy/doc 与无显示脚本门禁均通过；当前独立 CI 入口的 offline registry index 仍不完整，待 CI/镜像环境预热后复跑该入口；保持两项挂起，不执行真实 compositor 异常实验或 push
 ```
 

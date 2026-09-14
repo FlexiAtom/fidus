@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Copyright 2026 Flexiatom
+# SPDX-License-Identifier: Apache-2.0
+# Create a locally verifiable release manifest signature and SLSA provenance.
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+archive=${1:-"$root/fidus-live-debian12.tar.zst"}
+manifest=${FIDUS_RELEASE_MANIFEST:-"$root/fidus-live-debian12.manifest.json"}
+key=${FIDUS_RELEASE_SIGNING_KEY:-}
+signature="${manifest}.asc"
+attestation=${FIDUS_RELEASE_ATTESTATION:-"$root/fidus-live-debian12.provenance.json"}
+attestation_signature="${attestation}.asc"
+[[ -n "$key" ]] || { echo 'set FIDUS_RELEASE_SIGNING_KEY to a GPG key fingerprint or email' >&2; exit 2; }
+for tool in gpg sha256sum stat python3; do command -v "$tool" >/dev/null || { echo "$tool is required" >&2; exit 2; }; done
+[[ -f "$archive" && -f "$manifest" ]] || { echo 'archive or manifest is missing' >&2; exit 2; }
+archive_sha256=$(sha256sum "$archive" | awk '{print $1}')
+archive_size=$(stat -c '%s' "$archive")
+key_fingerprint=$(gpg --batch --with-colons --list-keys "$key" | awk -F: '$1 == "fpr" {print $10; exit}')
+[[ "$key_fingerprint" =~ ^[0-9A-Fa-f]{40}$ ]] || { echo 'signing key must resolve to an OpenPGP fingerprint' >&2; exit 2; }
+# Keep the manifest's provenance pointers explicit, then sign that exact byte sequence.
+python3 - "$manifest" "$signature" "$attestation" "$key_fingerprint" <<'PY'
+import json, pathlib, sys
+p = pathlib.Path(sys.argv[1]); data = json.loads(p.read_text())
+prov = data.setdefault("provenance", {})
+prov.update({"signature": pathlib.Path(sys.argv[2]).name,
+             "attestation": pathlib.Path(sys.argv[3]).name,
+             "signer_fingerprint": sys.argv[4]})
+p.write_text(json.dumps(data, indent=2) + "\n")
+PY
+manifest_sha256=$(sha256sum "$manifest" | awk '{print $1}')
+python3 - "$attestation" "$archive" "$archive_sha256" "$archive_size" "$manifest_sha256" "$key_fingerprint" "$manifest" <<'PY'
+import json, pathlib, sys
+out, archive, digest, size, manifest, fingerprint, manifest_path = sys.argv[1:]
+data = {
+  "schema_version": 1,
+  "predicate_type": "https://slsa.dev/provenance/v1",
+  "subject": [{"name": pathlib.Path(archive).name, "digest": {"sha256": digest}}],
+  "predicate": {"buildDefinition": {"buildType": "https://github.com/flexiatom/fidus/release"}},
+  "metadata": {"manifest_sha256": manifest, "archive_size_bytes": int(size), "image_id": json.loads(pathlib.Path(manifest_path).read_text())["image"]["image_id"], "signer_fingerprint": fingerprint}
+}
+pathlib.Path(out).write_text(json.dumps(data, indent=2) + "\n")
+PY
+gpg --batch --yes --local-user "$key_fingerprint" --armor --detach-sign --output "$signature" "$manifest"
+gpg --batch --yes --local-user "$key_fingerprint" --armor --detach-sign --output "$attestation_signature" "$attestation"
+printf 'signed manifest=%s attestation=%s signer=%s\n' "$signature" "$attestation_signature" "$key_fingerprint"

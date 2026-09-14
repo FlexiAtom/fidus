@@ -11,7 +11,9 @@
     "image_id": "sha256:c0e90aa9631003f96926a7ee6825863ef2b06d740029042acb79a03ce8aca7b5",
     "os": "linux",
     "architecture": "unknown-until-inspected",
-    "entrypoint": ["fidus-test"]
+    "entrypoint": [
+      "fidus-test"
+    ]
   },
   "source": {
     "commit": "5b8949cca4edb9a645d9552bb1766f8431bd120a",
@@ -33,9 +35,17 @@
     "complete": false
   },
   "provenance": {
-    "sbom": null,
-    "signature": null,
-    "attestation": null,
-    "cross_machine_validation": "pending"
+    "sbom": {
+      "filename": "fidus-live.sbom.spdx.json",
+      "format": "SPDX-2.3",
+      "sha256": "3912ca8d28dc10bf789fa2bf2c868452fe0cd4d65ac73b603efcc213b0abb98e",
+      "scope": "Cargo.lock plus final-stage Debian runtime package declarations",
+      "offline": true,
+      "unresolved_metadata": "Debian versions, licenses, and package hashes are NOASSERTION"
+    },
+    "signature": "fidus-live-debian12.manifest.json.asc",
+    "attestation": "fidus-live-debian12.provenance.json",
+    "cross_machine_validation": "pending",
+    "signer_fingerprint": "35B9FCDF90BCAEEDEFCB9A01FF667A65306051E0"
   }
 }

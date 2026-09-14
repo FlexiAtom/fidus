@@ -1,0 +1,11 @@
+# CI-only source configuration.  The checked-in lockfile and vendor tree are
+# the dependency boundary; no registry or git source is allowed in offline CI.
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "vendor"
+
+[net]
+offline = true
+retry = 0

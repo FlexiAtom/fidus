@@ -35,13 +35,20 @@ RUN sed -i \
 WORKDIR /workspace
 COPY . .
 
-# Resolve and compile every dependency while the build network is available;
-# the runtime container remains network-isolated and uses the cached graph.
-RUN cargo test --locked --workspace \
-    && cargo clippy --locked --workspace --all-targets -- -D warnings \
-    && cargo doc --locked --workspace --no-deps
+# Populate a complete, lockfile-derived source tree while the build network is
+# available.  A registry cache is not sufficient: it can be partial, mutable,
+# or accidentally supplied by a different lockfile.  The checked-in CI config
+# then makes every verification use only this directory.
+RUN rm -rf vendor \
+    && cargo vendor --locked vendor \
+    && test -d vendor \
+    && test -n "$(find vendor -mindepth 1 -maxdepth 1 -type d -print -quit)"
 ENV CARGO_NET_OFFLINE=true \
     CARGO_TARGET_DIR=/tmp/fidus-target
+RUN cargo metadata --locked --offline --config .cargo/config.ci.toml --format-version 1 >/dev/null \
+    && cargo test --locked --workspace --offline --config .cargo/config.ci.toml \
+    && cargo clippy --locked --workspace --all-targets --offline --config .cargo/config.ci.toml -- -D warnings \
+    && cargo doc --locked --workspace --no-deps --offline --config .cargo/config.ci.toml
 
 # The entrypoint performs deterministic checks and never acquires a display.
 CMD ["bash", "scripts/ci_fidus_test.sh"]

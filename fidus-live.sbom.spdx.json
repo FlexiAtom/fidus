@@ -1,0 +1,1055 @@
+{
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "comment": "Generated from Cargo.lock and the final runtime apt declaration. No network lookup or unobserved version is implied.",
+  "creationInfo": {
+    "created": "1970-01-01T00:00:00Z",
+    "creators": [
+      "Tool: fidus-sbom (offline)"
+    ]
+  },
+  "dataLicense": "CC0-1.0",
+  "documentNamespace": "https://fidus.invalid/sbom/0157902be9e85ec5f1333e0857ec86647c9cb8a4e530368f26b39569b7b7fac5",
+  "name": "fidus-live-sbom",
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Application-fidus-live",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "name": "fidus-live",
+      "versionInfo": "0.1.0-beta.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-bitflags-2.13.1",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "b588b76d00fde79687d7646a9b5bdf3cc0f655e0bbd080335a95d7e96f3587da"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "bitflags",
+      "versionInfo": "2.13.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-cc-1.4.4",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "0ad534f4357a5264cce5019c989cf66a4f0dc4e0d1b1d15f8aacec0ff7360273"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "cc",
+      "versionInfo": "1.4.4"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-downcast-rs-1.2.1",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "downcast-rs",
+      "versionInfo": "1.2.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-errno-0.3.14",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "errno",
+      "versionInfo": "0.3.14"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-fidus-0.1.0-beta.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "fidus",
+      "versionInfo": "0.1.0-beta.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-fidus-backend-wayland-layer-0.1.0-beta.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "fidus-backend-wayland-layer",
+      "versionInfo": "0.1.0-beta.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-fidus-backend-x11-0.1.0-beta.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "fidus-backend-x11",
+      "versionInfo": "0.1.0-beta.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-fidus-calibrate-0.1.0-beta.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "fidus-calibrate",
+      "versionInfo": "0.1.0-beta.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-fidus-core-0.1.0-beta.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "fidus-core",
+      "versionInfo": "0.1.0-beta.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-fidus-estimate-0.1.0-beta.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "fidus-estimate",
+      "versionInfo": "0.1.0-beta.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-fidus-test-0.1.0-beta.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "fidus-test",
+      "versionInfo": "0.1.0-beta.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-find-msvc-tools-0.1.11",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "d45db016d36b838f563236e9193d0ee6ce38f3f68b6c94e914b4929c96bbb890"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "find-msvc-tools",
+      "versionInfo": "0.1.11"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-gethostname-1.1.0",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "1bd49230192a3797a9a4d6abe9b3eed6f7fa4c8a8a4947977c6f80025f92cbd8"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "gethostname",
+      "versionInfo": "1.1.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libc-0.2.189",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "libc",
+      "versionInfo": "0.2.189"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-linux-raw-sys-0.12.1",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "linux-raw-sys",
+      "versionInfo": "0.12.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-memchr-2.8.3",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "memchr",
+      "versionInfo": "2.8.3"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-pkg-config-0.3.34",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "pkg-config",
+      "versionInfo": "0.3.34"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-proc-macro2-1.0.107",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "proc-macro2",
+      "versionInfo": "1.0.107"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-quick-xml-0.41.0",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "quick-xml",
+      "versionInfo": "0.41.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-quote-1.0.47",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "quote",
+      "versionInfo": "1.0.47"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-rustix-1.1.4",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "b6fe4565b9518b83ef4f91bb47ce29620ca828bd32cb7e408f0062e9930ba190"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "rustix",
+      "versionInfo": "1.1.4"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-shlex-2.0.1",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "shlex",
+      "versionInfo": "2.0.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-smallvec-1.16.0",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "b9be42f50aa861c555654aa3a37f52f4b1074bacf4e48fe0ef7fa584e80f1f0f"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "smallvec",
+      "versionInfo": "1.16.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-syn-3.0.4",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "e6275cddf4610d1775e6d1fe9469b2e77d0f39fd98fb7450901b821e0c53649f"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "syn",
+      "versionInfo": "3.0.4"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-thiserror-2.0.20",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "ec86235f5fcc2a73650310756d2ac5b138a5780bbbdfae3eeccec992c435ba4f"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "thiserror",
+      "versionInfo": "2.0.20"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-thiserror-impl-2.0.20",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "bc04cd3e1236dd4a98afca4569f2deb3f120e5422a4023be2cb683f8486292af"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "thiserror-impl",
+      "versionInfo": "2.0.20"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-unicode-ident-1.0.24",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "unicode-ident",
+      "versionInfo": "1.0.24"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-wayland-backend-0.3.17",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "38a91b4eaddff87b1cd1074985e3713da4af2c49742d1b356b2c01670a67a078"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "wayland-backend",
+      "versionInfo": "0.3.17"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-wayland-client-0.31.15",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "e3c36a0f861ad76d0901f2800b46321410d9f73f2ea88aac0650d86c32688073"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "wayland-client",
+      "versionInfo": "0.31.15"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-wayland-protocols-0.32.13",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "23d0c813de3daa2ed6520af85a3bd49b0e722a3078506899aa9686fea58dc4b6"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "wayland-protocols",
+      "versionInfo": "0.32.13"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-wayland-protocols-wlr-0.3.12",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "eb04e52f7836d7c7976c78ca0250d61e33873c34156a2a1fc9474828ec268234"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "wayland-protocols-wlr",
+      "versionInfo": "0.3.12"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-wayland-scanner-0.31.11",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "338e30461b3a2b67d70eb30a6d89f8e0c93a833e07d2ae89085cd070c4a00ac0"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "wayland-scanner",
+      "versionInfo": "0.31.11"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-wayland-sys-0.31.11",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "d8eab23fefc9e41f8e841df4a9c707e8a8c4ed26e944ef69297184de2785e3be"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "wayland-sys",
+      "versionInfo": "0.31.11"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-windows-link-0.2.1",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "windows-link",
+      "versionInfo": "0.2.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-windows-sys-0.61.2",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "windows-sys",
+      "versionInfo": "0.61.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-x11rb-0.13.2",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "9993aa5be5a26815fe2c3eacfc1fde061fc1a1f094bf1ad2a18bf9c495dd7414"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "x11rb",
+      "versionInfo": "0.13.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-x11rb-protocol-0.13.2",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
+        }
+      ],
+      "downloadLocation": "registry+https://github.com/rust-lang/crates.io-index",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "x11rb-protocol",
+      "versionInfo": "0.13.2"
+    }
+  ],
+  "relationships": [
+    {
+      "relatedSpdxElement": "SPDXRef-Package-bitflags-2.13.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-cc-1.4.4",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-downcast-rs-1.2.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-errno-0.3.14",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-fidus-0.1.0-beta.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-fidus-backend-wayland-layer-0.1.0-beta.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-fidus-backend-x11-0.1.0-beta.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-fidus-calibrate-0.1.0-beta.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-fidus-core-0.1.0-beta.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-fidus-estimate-0.1.0-beta.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-fidus-test-0.1.0-beta.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-find-msvc-tools-0.1.11",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-gethostname-1.1.0",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-libc-0.2.189",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-linux-raw-sys-0.12.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-memchr-2.8.3",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-pkg-config-0.3.34",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-proc-macro2-1.0.107",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-quick-xml-0.41.0",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-quote-1.0.47",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-rustix-1.1.4",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-shlex-2.0.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-smallvec-1.16.0",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-syn-3.0.4",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-thiserror-2.0.20",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-thiserror-impl-2.0.20",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-unicode-ident-1.0.24",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-wayland-backend-0.3.17",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-wayland-client-0.31.15",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-wayland-protocols-0.32.13",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-wayland-protocols-wlr-0.3.12",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-wayland-scanner-0.31.11",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-wayland-sys-0.31.11",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-windows-link-0.2.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-windows-sys-0.61.2",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-x11rb-0.13.2",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-x11rb-protocol-0.13.2",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Application-fidus-live"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-find-msvc-tools-0.1.11",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-cc-1.4.4"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-shlex-2.0.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-cc-1.4.4"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-libc-0.2.189",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-errno-0.3.14"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-windows-sys-0.61.2",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-errno-0.3.14"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-fidus-backend-wayland-layer-0.1.0-beta.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-fidus-0.1.0-beta.1"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-fidus-backend-x11-0.1.0-beta.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-fidus-0.1.0-beta.1"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-fidus-calibrate-0.1.0-beta.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-fidus-0.1.0-beta.1"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-fidus-core-0.1.0-beta.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-fidus-0.1.0-beta.1"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-fidus-estimate-0.1.0-beta.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-fidus-0.1.0-beta.1"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-fidus-core-0.1.0-beta.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-fidus-backend-wayland-layer-0.1.0-beta.1"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-libc-0.2.189",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-fidus-backend-wayland-layer-0.1.0-beta.1"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-thiserror-2.0.20",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-fidus-backend-wayland-layer-0.1.0-beta.1"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-wayland-backend-0.3.17",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-fidus-backend-wayland-layer-0.1.0-beta.1"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-wayland-client-0.31.15",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-fidus-backend-wayland-layer-0.1.0-beta.1"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-wayland-protocols-wlr-0.3.12",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-fidus-backend-wayland-layer-0.1.0-beta.1"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-fidus-core-0.1.0-beta.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-fidus-backend-x11-0.1.0-beta.1"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-thiserror-2.0.20",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-fidus-backend-x11-0.1.0-beta.1"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-x11rb-0.13.2",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-fidus-backend-x11-0.1.0-beta.1"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-fidus-core-0.1.0-beta.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-fidus-calibrate-0.1.0-beta.1"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-thiserror-2.0.20",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-fidus-calibrate-0.1.0-beta.1"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-thiserror-2.0.20",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-fidus-core-0.1.0-beta.1"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-fidus-core-0.1.0-beta.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-fidus-estimate-0.1.0-beta.1"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-fidus-0.1.0-beta.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-fidus-test-0.1.0-beta.1"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-rustix-1.1.4",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-gethostname-1.1.0"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-windows-link-0.2.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-gethostname-1.1.0"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-unicode-ident-1.0.24",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-proc-macro2-1.0.107"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-memchr-2.8.3",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-quick-xml-0.41.0"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-proc-macro2-1.0.107",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-quote-1.0.47"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-bitflags-2.13.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-rustix-1.1.4"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-errno-0.3.14",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-rustix-1.1.4"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-libc-0.2.189",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-rustix-1.1.4"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-linux-raw-sys-0.12.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-rustix-1.1.4"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-windows-sys-0.61.2",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-rustix-1.1.4"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-proc-macro2-1.0.107",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-syn-3.0.4"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-quote-1.0.47",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-syn-3.0.4"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-unicode-ident-1.0.24",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-syn-3.0.4"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-thiserror-impl-2.0.20",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-thiserror-2.0.20"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-proc-macro2-1.0.107",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-thiserror-impl-2.0.20"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-quote-1.0.47",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-thiserror-impl-2.0.20"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-syn-3.0.4",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-thiserror-impl-2.0.20"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-cc-1.4.4",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-wayland-backend-0.3.17"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-downcast-rs-1.2.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-wayland-backend-0.3.17"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-rustix-1.1.4",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-wayland-backend-0.3.17"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-smallvec-1.16.0",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-wayland-backend-0.3.17"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-wayland-sys-0.31.11",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-wayland-backend-0.3.17"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-bitflags-2.13.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-wayland-client-0.31.15"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-rustix-1.1.4",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-wayland-client-0.31.15"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-wayland-backend-0.3.17",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-wayland-client-0.31.15"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-wayland-scanner-0.31.11",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-wayland-client-0.31.15"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-bitflags-2.13.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-wayland-protocols-0.32.13"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-wayland-backend-0.3.17",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-wayland-protocols-0.32.13"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-wayland-client-0.31.15",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-wayland-protocols-0.32.13"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-wayland-scanner-0.31.11",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-wayland-protocols-0.32.13"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-bitflags-2.13.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-wayland-protocols-wlr-0.3.12"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-wayland-backend-0.3.17",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-wayland-protocols-wlr-0.3.12"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-wayland-client-0.31.15",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-wayland-protocols-wlr-0.3.12"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-wayland-protocols-0.32.13",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-wayland-protocols-wlr-0.3.12"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-wayland-scanner-0.31.11",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-wayland-protocols-wlr-0.3.12"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-proc-macro2-1.0.107",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-wayland-scanner-0.31.11"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-quick-xml-0.41.0",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-wayland-scanner-0.31.11"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-quote-1.0.47",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-wayland-scanner-0.31.11"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-pkg-config-0.3.34",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-wayland-sys-0.31.11"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-windows-link-0.2.1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-windows-sys-0.61.2"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-gethostname-1.1.0",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-x11rb-0.13.2"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-rustix-1.1.4",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-x11rb-0.13.2"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-x11rb-protocol-0.13.2",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-x11rb-0.13.2"
+    }
+  ],
+  "spdxVersion": "SPDX-2.3"
+}

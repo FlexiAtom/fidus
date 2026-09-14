@@ -8,8 +8,13 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 archive=${1:-"$root/fidus-live-debian12.tar.zst"}
 checksum=${archive}.sha256
 manifest=${FIDUS_RELEASE_MANIFEST:-"$root/fidus-live-debian12.manifest.json"}
+sbom=${FIDUS_RELEASE_SBOM:-"$root/fidus-live.sbom.spdx.json"}
 image_id_file="$root/fidus-live-debian12.image-id"
-[[ -f "$archive" && -f "$checksum" && -f "$manifest" && -f "$image_id_file" ]] || {
+signature=${FIDUS_RELEASE_SIGNATURE:-"${manifest}.asc"}
+attestation=${FIDUS_RELEASE_ATTESTATION:-"$root/fidus-live-debian12.provenance.json"}
+attestation_signature=${FIDUS_RELEASE_ATTESTATION_SIGNATURE:-"${attestation}.asc"}
+signer_fingerprint=${FIDUS_RELEASE_SIGNER_FINGERPRINT:-}
+[[ -f "$archive" && -f "$checksum" && -f "$manifest" && -f "$image_id_file" && -f "$sbom" ]] || {
   echo "release artifact, checksum, manifest, or image ID is missing" >&2
   exit 2
 }
@@ -31,6 +36,49 @@ grep -q '"filename": "'"$(basename "$archive")"'"' "$manifest" || { echo "manife
 grep -q '"sha256": "'"$archive_sha256"'"' "$manifest" || { echo "manifest hash mismatch" >&2; exit 2; }
 grep -q '"size_bytes": '"$archive_size"',' "$manifest" || { echo "manifest size mismatch" >&2; exit 2; }
 grep -q '"image_id": "'"$image_id"'"' "$manifest" || { echo "manifest image ID mismatch" >&2; exit 2; }
+bash "$root/scripts/verify_sbom.sh" "$sbom" "$root/Cargo.lock" "$root/Dockerfile.live-container" >/dev/null
+sbom_sha256=$(sha256sum "$sbom" | awk '{print $1}')
+grep -q '"sha256": "'"$sbom_sha256"'"' "$manifest" || { echo "manifest SBOM hash mismatch" >&2; exit 2; }
+[[ -f "$signature" && -f "$attestation" && -f "$attestation_signature" ]] || {
+  echo "detached manifest signature or provenance attestation is missing" >&2
+  exit 2
+}
+command -v gpg >/dev/null 2>&1 || { echo "gpg is required to verify release signatures" >&2; exit 2; }
+verify_signed_file() {
+  local file=$1 sig=$2 label=$3 status fingerprint
+  status=$(mktemp)
+  trap 'rm -f "$status"' RETURN
+  gpg --batch --status-fd 1 --verify "$sig" "$file" >"$status" 2>/dev/null || {
+    echo "$label signature verification failed" >&2
+    exit 1
+  }
+  fingerprint=$(awk '$2 == "VALIDSIG" {print $3; exit}' "$status")
+  [[ -n "$fingerprint" ]] || { echo "$label signature has no valid signer" >&2; exit 1; }
+  if [[ -n "$signer_fingerprint" && "$fingerprint" != "$signer_fingerprint" ]]; then
+    echo "$label signed by unexpected key: $fingerprint" >&2
+    exit 1
+  fi
+}
+verify_signed_file "$manifest" "$signature" manifest
+verify_signed_file "$attestation" "$attestation_signature" attestation
+python3 - "$attestation" "$manifest" "$archive" "$archive_sha256" "$archive_size" "$image_id" <<'PY'
+import hashlib, json, pathlib, sys
+att, manifest, archive, digest, size, image_id = sys.argv[1:]
+try:
+    data = json.loads(pathlib.Path(att).read_text())
+    if data.get("schema_version") != 1 or data.get("predicate_type") != "https://slsa.dev/provenance/v1":
+        raise ValueError("unsupported provenance schema")
+    subject = data.get("subject")
+    if not isinstance(subject, list) or not any(s.get("name") == pathlib.Path(archive).name and s.get("digest", {}).get("sha256") == digest for s in subject):
+        raise ValueError("archive is not a provenance subject")
+    if data.get("metadata", {}).get("manifest_sha256") != hashlib.sha256(pathlib.Path(manifest).read_bytes()).hexdigest():
+        raise ValueError("manifest binding mismatch")
+    if data.get("metadata", {}).get("archive_size_bytes") != int(size) or data.get("metadata", {}).get("image_id") != image_id:
+        raise ValueError("artifact metadata mismatch")
+except (OSError, ValueError, json.JSONDecodeError) as exc:
+    print(f"invalid provenance attestation: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+PY
 tag="fidus-release-verify-$$"
 cleanup() { docker image rm "$tag" >/dev/null 2>&1 || true; }
 trap cleanup EXIT

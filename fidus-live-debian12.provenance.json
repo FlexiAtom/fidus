@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "predicate_type": "https://slsa.dev/provenance/v1",
+  "subject": [
+    {
+      "name": "fidus-live-debian12.tar.zst",
+      "digest": {
+        "sha256": "40e3008f82cb4e8e457f06375d92da9ae91aa1c15a07aab359e8f114d9513f69"
+      }
+    }
+  ],
+  "predicate": {
+    "buildDefinition": {
+      "buildType": "https://github.com/flexiatom/fidus/release"
+    }
+  },
+  "metadata": {
+    "manifest_sha256": "223c4fa4775bd25a9fb79ab6580d549e63233cfc284256635a941e43d6213c21",
+    "archive_size_bytes": 39276475,
+    "image_id": "sha256:c0e90aa9631003f96926a7ee6825863ef2b06d740029042acb79a03ce8aca7b5",
+    "signer_fingerprint": "35B9FCDF90BCAEEDEFCB9A01FF667A65306051E0"
+  }
+}

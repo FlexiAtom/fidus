@@ -12,6 +12,25 @@ fidus 是一个纯 Rust 定位库：在平台窗口坐标 API 不可信的环境
 
 零信任**不是一句口号，也不是主动挑选的清高姿态——它是被平台 API 活活坑出来的、被迫且唯一的选择**。下一节是实机取证。
 
+## 离线 CI 与依赖完整性
+
+`Dockerfile.ci` 在有网络的构建阶段依据提交的 `Cargo.lock` 执行
+`cargo vendor --locked vendor`，随后所有测试、clippy 和文档检查都通过
+`.cargo/config.ci.toml` 只读取 `vendor/`，并显式使用 `--offline`。这比把
+`CARGO_HOME` 当作缓存更可靠：部分、过期或来自另一份 lockfile 的缓存不会被
+误判为成功，缺失依赖会在 metadata 阶段立即失败。
+
+本地运行同一门禁前，应在联网环境生成 vendor 树：
+
+```bash
+cargo vendor --locked vendor
+bash scripts/ci_fidus_test.sh
+```
+
+`vendor/` 是由 lockfile 派生的构建输入，不应手工编辑；更新依赖后必须重新生成，
+并检查 `vendor/` 与 `Cargo.lock` 一起提交（或由 CI 镜像构建阶段生成）。脚本在缺少
+`.cargo/config.ci.toml` 或 `vendor/` 时拒绝运行，而不会悄悄退回 registry 缓存。
+
 ## 为什么零信任是被迫的：实机取证
 
 以下全部可在本机复现（Niri 26.04 / wayland-1 / eDP-1 1366×768）。结论先行：**在 Wayland 下，"我的窗口在屏幕哪里"这个问题在协议层面根本没有提问的入口**——不是 API 返回了错值，是压根没有这个 API。

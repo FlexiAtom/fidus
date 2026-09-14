@@ -12,13 +12,32 @@ The image was built from:
 - Rust toolchain: `1.86.0`, downloaded through `https://rsproxy.cn`
 - image ID: see `fidus-live-debian12.image-id`
 - archive SHA-256: see `fidus-live-debian12.tar.zst.sha256`
-- release manifest: see `fidus-live-debian12.manifest.json` (SBOM, signature, attestation, and cross-machine validation remain unavailable)
+- release manifest: see `fidus-live-debian12.manifest.json`
+- offline SBOM: `fidus-live.sbom.spdx.json` (SPDX 2.3; hash and scope are bound in the manifest)
+
+The SBOM is declaration-only and covers the Cargo.lock dependency closure and
+final-stage Debian runtime package names from `Dockerfile.live-container`.
+Rust registry checksums come from Cargo.lock. Debian versions, licenses, and
+hashes are `NOASSERTION`: no apt metadata is fabricated. Generate and verify it
+offline with `scripts/generate_sbom.py` and `scripts/verify_sbom.sh`; these do
+not access the network.
+
+- detached OpenPGP signature: `fidus-live-debian12.manifest.json.asc`
+- SLSA v1 provenance attestation: `fidus-live-debian12.provenance.json` and detached signature `.asc`
+- signer identity: the manifest `provenance.signer_fingerprint` field (verification can pin it with `FIDUS_RELEASE_SIGNER_FINGERPRINT`)
+
+The repository does not contain a private signing key. A release operator must create
+these files locally with `scripts/sign_release.sh`; never replace them with a
+hand-written or placeholder signature.
 
 ## Import
 
 ```sh
 zstd -dc fidus-live-debian12.tar.zst | docker load
 sha256sum -c fidus-live-debian12.tar.zst.sha256
+# Import the trusted public key into a dedicated GnuPG homedir first.
+FIDUS_RELEASE_SIGNER_FINGERPRINT=<40-hex-fingerprint> \
+  scripts/verify_release_image.sh fidus-live-debian12.tar.zst
 ```
 
 The loaded tag is `fidus-live:debian12`. Pass that tag to
