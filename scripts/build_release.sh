@@ -21,7 +21,14 @@ tmp=$(mktemp -d "${TMPDIR:-/tmp}/fidus-release.XXXXXX")
 cleanup() { rm -rf "$tmp"; docker image rm "$tag" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
-docker build --pull -f "$root/Dockerfile.live-container" -t "$tag" "$root"
+build_network=${FIDUS_DOCKER_BUILD_NETWORK:-host}
+[[ "$build_network" == host || "$build_network" == none ]] || {
+  echo "FIDUS_DOCKER_BUILD_NETWORK must be host or none" >&2
+  exit 2
+}
+# Build network access is explicit and scoped to image construction; runtime
+# verification remains network-isolated.
+docker build --network="$build_network" --pull -f "$root/Dockerfile.live-container" -t "$tag" "$root"
 docker save "$tag" | zstd -T0 -q -o "$tmp/fidus-live-debian12.tar.zst"
 image_id=$(docker image inspect "$tag" --format '{{.Id}}')
 [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "malformed image ID" >&2; exit 1; }
