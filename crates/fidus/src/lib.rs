@@ -3,12 +3,13 @@
 
 //! # fidus — Zero-Trust Coordinate positioning engine
 //!
-//! fidus locates things on screen for environments where platform
-//! window-coordinate APIs cannot be trusted (Wayland compositors are the
-//! canonical case). It never wraps a native coordinate API: it projects its
-//! own markers through basic compositor primitives, captures the screen, and
-//! solves its own coordinate frame from those measurements. *What* to locate
-//! is the caller's business; fidus provides the map.
+//! fidus locates the caller's own window on screen for environments where
+//! platform window-coordinate APIs cannot be trusted (Wayland compositors are
+//! the canonical case). The caller supplies that window's offscreen render;
+//! fidus never wraps a native coordinate API: it projects its own markers
+//! through basic compositor primitives, captures the screen, and solves its
+//! own coordinate frame from those measurements. It does not enumerate or
+//! locate arbitrary third-party system windows, or provide window identity.
 //!
 //! ## Usage
 //!

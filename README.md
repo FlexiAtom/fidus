@@ -8,7 +8,7 @@
 > **想提新思路** → [`docs/proposals/`](./docs/proposals/)（提案 → 草案 → 方案，提案先审）
 > **想考古** → [`docs/history/`](./docs/history/)（前身草案，均已被取代，勿据此实现）
 
-fidus 是一个纯 Rust 定位库：在平台窗口坐标 API 不可信的环境下，它**不封装任何原生坐标 API**，而是用最基础的合成器原语（`wl_surface` / `wl_shm` / layer-shell、通用截屏）投射自己的标记、截取自己的屏幕、解算自己的坐标系。**定位什么由调用方决定；fidus 提供地图。**
+fidus 是一个纯 Rust **自身窗口定位库**：在平台窗口坐标 API 不可信的环境下，它**不封装任何原生坐标 API**，而是用最基础的合成器原语（`wl_surface` / `wl_shm` / layer-shell、通用截屏）投射自己的标记、截取自己的屏幕、解算自己的坐标系。调用方提供**自身窗口的离屏渲染模板**，fidus 返回该窗口可见内容的位置；fidus 不负责枚举、识别或定位任意第三方系统窗口，也不提供窗口实例身份。
 
 零信任**不是一句口号，也不是主动挑选的清高姿态——它是被平台 API 活活坑出来的、被迫且唯一的选择**。下一节是实机取证。
 
@@ -147,7 +147,7 @@ $ FIDUS_BACKEND=x11 cargo run -p fidus --bin fidus-live-calibrate
 | **P2** | C 层增量追踪：L1 Fingerprint + 运行时 target 注册（P2-a）→ L8 EdgeSync + MotionGate（P2-b）→ L4/L7 融合，常速度 KF（P2-c）→ L0 Anchor 通用校准器 + X11 backend（P2-d）→ ScreenClassifier 动态壁纸自动检测（P2-e）→ 审查修复 + `SolvedMap` 坐标注入封印（P2-f）→ 目标可定位性准入 + 逃生门（P2-g）→ 文档整合（P2-h） | ✅ 完成 |
 | **P3** | ~~L10 GradientField~~ 实测推翻；转向 **L9 真实桌面稳健性**：差分 ∧ 颜色 ∧ 多帧互证 | ✅ 实机 A/B 12/12 失败 → 0/30 |
 | **P4** | `fidus-test` 跨环境测试子项目：ci / live-host / live-container | ✅ 本机实现与候选归档已完成；当前正式发布未收口，跨机器验证挂起 |
-| **P5** | 宿主 output mutation/recovery：显式授权、快照、read-back、恢复和 PGID 监督 | ⚠️ 最小 runner 与无显示回归已完成；真实桌面错误处理单点验证挂起，NameOnly 不得 confirmed |
+| **P5** | 宿主 output mutation/recovery：显式授权、快照、read-back、恢复和 PGID 监督 | ⚠️ 最小 runner 与无显示回归已完成；真实桌面错误处理单点验证已冻结（约等于挂起），意外恢复不可靠，NameOnly 不得 confirmed |
 
 当前可在 Niri / Sway / Hyprland / KDE Plasma 等支持 `zwlr_layer_shell_v1` + `zwlr_screencopy_manager_v1` 的 Wayland 合成器上以 L9 校准，在真 X server 上以 L0 校准（后端由 `FidusBuilder` 自动选择：layer-shell 优先，其次 X11），并可注册调用方自己的渲染模板做稳态追踪：L1 模板匹配 + L8 门控差分融合进常速度 Kalman 跟踪器（L7，P2-c）——拖拽跟随、动画期滑行（置信度 0 的标注信念而非伪造测量）、丢失后重捕获。Windows、macOS、GNOME（portal 路径）的 backend 尚未实现。
 

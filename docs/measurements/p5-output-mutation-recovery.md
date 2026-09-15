@@ -263,9 +263,34 @@ scripts/p5_niri_output_probe.sh
 
 `fidus-test` 已加入 P5 纯 Rust fake/fixture 测试；`scripts/test_output_mutation_runner.sh` 已加入 fake Niri 集成回归，覆盖未授权、NameOnly recovery=4、child failure recovery 优先、restore、symlink lock、flock 竞争、malformed/deferred parser；测试通过。完整 workspace test、clippy、doc、shell 语法和 diff 检查也通过。
 
-## 当前挂起事项
+## 当前状态
 
-1. **跨机器发布验证：挂起**。当前记录只证明本机产物、镜像和当前环境，不能宣称跨机器复现。
-2. **真实桌面错误处理单点验证：挂起**。用户要求先挂起该项，因此 fake Niri/无显示回归不能替代真实 compositor 异常路径证据。
+1. **跨机器发布验证：社区互助处理中**。当前记录只证明本机产物、镜像和当前环境，不能宣称跨机器复现。
+2. **真实桌面错误处理单点验证：已冻结（约等于挂起）**。不再要求或默认执行真实 compositor 异常路径实验；fake Niri/无显示回归不能升级为真实证据。
 
-两项均不是通过或失败，恢复前不得从 pending 清单中删除。
+## 意外恢复失败后的人工恢复
+
+若经过单独授权执行真实 mutation，操作者必须在 mutation 前把以下信息写入屏幕外日志：
+
+```text
+output selector
+original scale
+original transform
+snapshot timestamp
+```
+
+若 runner 异常退出、返回 `recovery=unverified`、会话崩溃或被 SIGKILL：
+
+1. 停止其它 output mutation；
+2. 通过 `niri msg outputs` 确认目标 selector 仍唯一且已连接；
+3. 执行记录中的原值：
+
+```bash
+niri msg output <OUTPUT> scale <ORIGINAL_SCALE>
+niri msg output <OUTPUT> transform <ORIGINAL_TRANSFORM>
+niri msg outputs
+```
+
+4. 逐字段核对读回结果；无法确认 selector 或原值时，不得猜测恢复为 `scale=1` / `transform=normal`，应交由人工继续处置。
+
+这只是降低遗留风险的人工补救，不证明自动恢复可靠；意外路径下恢复明确标记为不可靠，也不得据此报告 `recovery=confirmed`。

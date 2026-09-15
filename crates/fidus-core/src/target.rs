@@ -3,10 +3,11 @@
 
 //! The tracking-target contract (C layer, spec §3.2 / §6.1).
 //!
-//! The caller tells fidus *what* to locate by handing over its own offscreen
-//! render. Both types are pure visual inputs: nothing here reads or wraps a
-//! platform coordinate, so runtime target registration cannot violate the
-//! zero-trust rule.
+//! The caller tells fidus *where its own window is* by handing over that
+//! window's offscreen render. Both types are pure visual inputs: nothing here
+//! reads or wraps a platform coordinate, so runtime target registration cannot
+//! violate the zero-trust rule. fidus does not enumerate or locate arbitrary
+//! third-party system windows.
 
 use crate::coord::LogicalPoint;
 use crate::io::Frame;

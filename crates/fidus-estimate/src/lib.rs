@@ -16,9 +16,10 @@
 //!
 //! # Target registration (spec §3.2 / §6.1)
 //!
-//! The caller describes *what* to locate by registering a
-//! [`TargetDescription`] — its own offscreen render, a pure visual input.
-//! Nothing here reads or wraps a platform coordinate.
+//! The caller describes its own window by registering a
+//! [`TargetDescription`] — that window's offscreen render, a pure visual input.
+//! Nothing here reads or wraps a platform coordinate, and this crate does not
+//! enumerate or locate arbitrary third-party system windows.
 
 use fidus_core::coord::{LogicalPoint, PhysicalPoint};
 use fidus_core::engine::Estimator;

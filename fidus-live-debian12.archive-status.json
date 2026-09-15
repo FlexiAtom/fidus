@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "artifact": {
+    "filename": "fidus-live-debian12.tar.zst",
+    "sha256": "40e3008f82cb4e8e457f06375d92da9ae91aa1c15a07aab359e8f114d9513f69",
+    "size_bytes": 39276475
+  },
+  "status": "historical",
+  "current_release_eligible": false,
+  "source_binding": {
+    "status": "legacy-unbound",
+    "historical_commit": "5b8949cca4edb9a645d9552bb1766f8431bd120a",
+    "historical_tree": "e977917e30a38b825bc4fe2a9bf188026247c564"
+  },
+  "reason": "This checked-in artifact predates the current source revision binding format and must not be relabeled as a current-tree release.",
+  "replacement_policy": "Generate a new isolated artifact and manifest from a clean checkout; never rewrite this historical artifact."
+}

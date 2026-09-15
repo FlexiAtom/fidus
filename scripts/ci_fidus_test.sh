@@ -38,9 +38,13 @@ cargo metadata "${cargo_args[@]}" --format-version 1 >/dev/null
 # a dedicated formatting-only change can avoid mixing unrelated rewrites.
 bash scripts/check_p5_matrix.sh
 bash scripts/test_output_mutation_runner.sh
+bash scripts/test_manual_restore_output.sh
 bash scripts/test_ci_offline_contract.sh
 bash scripts/verify_sbom.sh
 python3 tools/test_generate_test_images.py
+python3 scripts/verify_archive_status.py fidus-live-debian12.archive-status.json
+python3 scripts/test_verify_archive_status.py
+python3 scripts/test_verify_release_metadata.py
 # The live-container contract's positive path requires a real display socket;
 # keep it out of deterministic no-display CI and run it in its dedicated job.
 cargo test "${cargo_args[@]}" --workspace

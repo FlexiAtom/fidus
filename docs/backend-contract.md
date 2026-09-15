@@ -1,5 +1,7 @@
 # 后端契约（移植到新平台）
 
+> **范围边界**：fidus 只定位调用方自身窗口；后端只为自身窗口的标记投射与屏幕截取提供原语，不枚举、识别或定位第三方系统窗口。
+>
 > **读者**：想把 fidus 带到 Windows / macOS / 某个新合成器的人。
 > 规范见 [`spec.md`](spec.md)；Wayland 具体协议见 [`layer-shell-primer.md`](layer-shell-primer.md)。
 

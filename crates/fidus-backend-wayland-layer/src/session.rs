@@ -83,9 +83,32 @@ pub(crate) enum BufferState {
     Destroyed,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(not(test), allow(dead_code))]
+ pub(crate) enum BufferEvent {
+    Submit,
+    Ready,
+    Failed,
+    Release,
+    Destroy,
+}
+
 impl BufferState {
     pub(crate) fn may_reuse(self) -> bool {
         matches!(self, Self::Idle | Self::Released)
+    }
+
+    /// Apply one protocol event. Invalid late events leave the state unchanged.
+    #[cfg(test)]
+    pub(crate) fn apply(self, event: BufferEvent) -> Self {
+        match (self, event) {
+            (Self::Idle | Self::Released, BufferEvent::Submit) => Self::Submitted,
+            (Self::Submitted, BufferEvent::Ready) => Self::Ready,
+            (Self::Submitted, BufferEvent::Failed) => Self::Failed,
+            (Self::Submitted | Self::Ready | Self::Failed, BufferEvent::Release) => Self::Released,
+            (Self::Idle | Self::Released | Self::Failed, BufferEvent::Destroy) => Self::Destroyed,
+            _ => self,
+        }
     }
 
 }
@@ -450,5 +473,33 @@ mod tests {
         assert!(BufferState::Idle.may_reuse());
         assert!(BufferState::Released.may_reuse());
         assert!(!BufferState::Submitted.may_reuse());
+    }
+
+    #[test]
+    fn deferred_release_does_not_confuse_ready_with_reuse() {
+        use super::BufferEvent::{Ready, Release, Submit};
+        let state = BufferState::Idle.apply(Submit).apply(Ready);
+        assert_eq!(state, BufferState::Ready);
+        assert!(!state.may_reuse());
+        assert_eq!(state.apply(Release), BufferState::Released);
+        assert!(state.apply(Release).may_reuse());
+    }
+
+    #[test]
+    fn failed_buffer_can_retire_but_late_ready_cannot_resurrect_it() {
+        use super::BufferEvent::{Failed, Ready, Release, Submit};
+        let state = BufferState::Idle.apply(Submit).apply(Failed);
+        assert_eq!(state.apply(Ready), BufferState::Failed);
+        assert_eq!(state.apply(Release), BufferState::Released);
+        assert!(state.apply(Release).may_reuse());
+    }
+
+    #[test]
+    fn destroy_is_not_a_release_and_late_events_stay_destroyed() {
+        use super::BufferEvent::{Destroy, Release, Submit};
+        let state = BufferState::Idle.apply(Submit).apply(Release).apply(Destroy);
+        assert_eq!(state, BufferState::Destroyed);
+        assert!(!state.may_reuse());
+        assert_eq!(state.apply(Release), BufferState::Destroyed);
     }
 }

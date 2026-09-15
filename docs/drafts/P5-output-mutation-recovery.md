@@ -519,4 +519,4 @@ SIGKILL、宿主崩溃和 compositor 重启只做分类实验，不做恢复成�
 有条件通过；七项设计决策已完成，允许转入方案编写；不允许直接实现真实 mutation。
 ```
 
-上述结论是草案阶段记录。当前已进入方案并实现最小显式 runner；当前 runner 的无显示回归、timeout、外部修改保护、单一 lifecycle+summary 输出和 F1–F42 映射见 `docs/measurements/p5-f1-f42-matrix.md`。真实桌面错误处理单点验证与跨机器发布验证仍保持挂起。已完成的协议决策不能被这些实验重新放宽：NameOnly 永远不能升级为稳定身份，SIGKILL/宿主崩溃/compositor 重启永远不能声称恢复成功。
+上述结论是草案阶段记录。当前已进入方案并实现最小显式 runner；当前 runner 的无显示回归、timeout、外部修改保护、单一 lifecycle+summary 输出和 F1–F42 映射见 `docs/measurements/p5-f1-f42-matrix.md`。真实桌面错误处理单点验证已冻结（约等于挂起），跨机器发布验证进入社区互助处理中。已完成的协议决策不能被这些实验重新放宽：NameOnly 永远不能升级为稳定身份，SIGKILL/宿主崩溃/compositor 重启永远不能声称恢复成功；意外恢复不可靠，必要时只能按规范提供人工恢复。

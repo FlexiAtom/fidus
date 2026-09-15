@@ -43,13 +43,14 @@ impl ProbabilisticPosition {
     /// This constructor is kept infallible for API compatibility; callers that
     /// accept untrusted values must use [`Self::try_new`] instead. Invalid
     /// values are never admitted by [`crate::engine::FidusEngine::estimate`].
+    #[deprecated(note = "use try_new() for validated measurements")]
     pub fn new(position: LogicalPoint, confidence: f32, source: MeasurementSource) -> Self {
         Self { position, confidence, bbox_physical: None, measured_at: Instant::now(), source }
     }
 
     /// Constructs an estimate only when position and confidence are valid.
     pub fn try_new(position: LogicalPoint, confidence: f32, source: MeasurementSource) -> Option<Self> {
-        let estimate = Self::new(position, confidence, source);
+        let estimate = Self { position, confidence, bbox_physical: None, measured_at: Instant::now(), source };
         estimate.is_valid().then_some(estimate)
     }
 

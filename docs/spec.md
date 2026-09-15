@@ -2,6 +2,8 @@
 
 > **零信任坐标 · 当窗口系统拒绝开口，你就自己把坐标系画在墙上**
 >
+> **范围定义：fidus 只定位调用方自身窗口。** 调用方提供自身窗口的离屏渲染模板，fidus 通过投射、截屏和视觉匹配返回该窗口可见内容的位置；不枚举、识别或定位任意第三方系统窗口，不提供窗口实例身份，也不承诺在目标完全不可见时恢复其几何位置。
+>
 > 状态：架构冻结候选（Architecture Freeze Candidate）
 > 更新日期：2026-09-04
 > 继承：v0.4（方法论）→ v0.5（校准器重构）→ **v0.5.1（精神内核 + 概率池纯净性）**
@@ -416,6 +418,8 @@ match availability {
 
 ### 6.1 输入白名单
 
+> **自身窗口范围**：本节的目标是调用方自身窗口。调用方提供该窗口的离屏渲染模板，L1/L8/L7 只负责在截屏中定位其可见内容；fidus 不枚举、识别或定位任意第三方系统窗口，也不提供窗口实例身份。目标完全不可见时，系统必须报告丢失或低置信度，不得声称恢复了窗口几何。
+
 | 输入源 | 进池？ | 理由 |
 |---|---|---|
 | L9 Crosshair 视觉测量 | ✅ | 纯视觉，噪声可建模 |
@@ -675,11 +679,19 @@ P5 当前保守退出码真值表如下；恢复未被稳定身份或 read-back 
 | child 返回非零但恢复仍只能是 NameOnly | `unverified` | `4` |
 | 未来具备稳定 identity 且所有字段 read-back 成功 | `confirmed` | child 原始结果（0 或业务失败） |
 
-真实桌面错误处理的单点验证目前挂起，不能用本机 fake 回归替代；跨机器发布验证也单独挂起。
+真实桌面错误处理的单点验证已冻结：本项目不再要求或默认执行该真实异常实验，不能用本机 fake 回归替代真实 compositor 证据，也不能把 TTY/独立终端当作隔离。跨机器发布验证另行按社区互助流程处理。
 
-#### 8.7.4 实现状态
+**意外恢复失败的人工处置**：真实 mutation 若经明确授权执行，操作者必须在开始前把 `output`、原始 `scale`、原始 `transform` 和读取时间记录到屏幕外的持久日志；若 runner 返回 `recovery=unverified`、异常退出、会话崩溃或被 SIGKILL，必须先停止其它 output mutation，再从同一会话的 `niri msg outputs` 确认目标 selector，手动执行 `niri msg output <OUTPUT> scale <ORIGINAL_SCALE>` 与 `niri msg output <OUTPUT> transform <ORIGINAL_TRANSFORM>`，随后再次读取并逐字段核对。若 selector/原值/当前状态无法确认，禁止猜测 `scale=1` 或 `transform=normal`，应保持 `recovery=unverified` 并由人工恢复。该人工流程只能降低遗留风险，不能证明自动恢复可靠；意外路径下恢复本身明确不可靠。
 
-已完成：提案批准、草案全审、协议 recovery parser 约束、Niri 只读/正常路径实验、fake 模型实验、锁竞争和进程组实验、`fidus-test` 纯测试 fixture，以及仅供显式手工调用的最小 `scripts/output_mutation_runner.sh`（fake Niri 回归通过）。方案 A 审计还修复了 snapshot 后早退恢复、recovery 优先、实际 PGID 信号转发、symlink lock、ASCII 控制字符、malformed/deferred parser 和并发 flock 边界。尚未完成：真实 Niri 异常路径与跨 compositor 身份证明；该脚本仍不是默认测试入口，当前 NameOnly 即使字段恢复也只能返回 `recovery=unverified`/退出码 4，不能报告 confirmed。因此不得把 P5 方案写成完整 P5 已实现。
+本人工流程不进入默认 CI 或生产路径，也不把手动恢复结果升级为 `recovery=confirmed`。
+
+#### 8.7.4 人工恢复工具方案
+
+`P5-manual-output-recovery.md` 已完成提案阶段的核心假设核验和自审裁枝，现转入本方案并实现为 `scripts/manual_restore_output.sh`。该工具只接受显式 `--allow-output-mutation`、output selector、原始 scale 和原始 transform；执行前解析 `niri msg outputs`，要求目标 output 唯一且已连接；随后分别设置两个字段、逐字段读回并写入屏外日志。selector 不唯一、参数错误、环境不可用、setter 失败或读回不一致均不得猜测默认值，并返回保守非零结果。工具只提供人工补救，不自动接管崩溃、不证明稳定 identity、不把结果升级为 `recovery=confirmed`，也不进入默认 CI 或生产路径。无显示 fake 回归必须覆盖正常恢复、selector 拒绝、部分 setter 失败、读回不一致和日志记录。
+
+#### 8.7.5 实现状态
+
+已完成：提案批准、草案全审、协议 recovery parser 约束、Niri 只读/正常路径实验、fake 模型实验、锁竞争和进程组实验、`fidus-test` 纯测试 fixture、仅供显式手工调用的最小 `scripts/output_mutation_runner.sh`，以及仅供显式人工调用的 `scripts/manual_restore_output.sh`（含 selector/字段 read-back、日志和 fake 正负回归）（fake Niri 回归通过）。方案 A 审计还修复了 snapshot 后早退恢复、recovery 优先、实际 PGID 信号转发、symlink lock、ASCII 控制字符、malformed/deferred parser 和并发 flock 边界。尚未完成：真实 Niri 异常路径与跨 compositor 身份证明；该脚本仍不是默认测试入口，当前 NameOnly 即使字段恢复也只能返回 `recovery=unverified`/退出码 4，不能报告 confirmed。因此不得把 P5 方案写成完整 P5 已实现。
 
 ---
 
@@ -718,7 +730,15 @@ WP-A Fused 置信度
 
 每个工作包完成时必须同时提交：代码入口和调用链、失效模式说明、无显示回归、失败/回滚边界、实际命令及结果。工作包之间不得用 fake 证据替代真实 compositor 或跨机器证据。
 
-### 8.8.4 当前验收与授权边界
+### 8.8.4 历史归档状态标注
+
+历史归档不得通过修改原 archive、manifest、provenance 或签名来补齐新格式。允许增加与归档绑定的机器可读旁证文件，例如 `fidus-live-debian12.archive-status.json`，但它只解释历史状态，不改变发布校验结果。
+
+标注文件必须包含归档 `filename`、`sha256`、`size_bytes`，并固定声明 `status=historical`、`current_release_eligible=false`。旧来源只能放在 `source_binding.status=legacy-unbound` 与 `historical_commit`/`historical_tree` 字段中，不能伪装成当前 `source.revision_binding`。标注文件作为普通受版本控制文件参与 source digest，不列入签名阶段可变 release outputs 的排除列表。
+
+工具必须区分 `current-bound`、`historical-unbound`、`invalid`：历史标注只能使旧归档状态更可解释，不能绕过当前源码绑定、artifact/SBOM/provenance hash、签名或正式发布门禁。标注自身与归档 hash/size 不匹配、字段缺失、JSON 非法，或被篡改为当前可发布状态时必须 fail-closed。真实发布和跨机器验证仍由独立授权与证据门槛决定。
+
+### 8.8.5 当前验收与授权边界
 
 - 无显示矩阵仍按 F1–F42 单项统计；`real-pending` 不得改写为 `pass`。
 - 真实 Niri 正常路径只能证明本机观察；当前 NameOnly 身份不能产生 `recovery=confirmed`。
