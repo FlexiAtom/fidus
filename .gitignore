@@ -42,3 +42,20 @@ Thumbs.db
 *.log
 .env
 .env.*
+
+# CLI 本机局部设置（权限 allow 规则等），不随仓库共享
+.qoder/
+
+# 已迁移到 Athena 状态根（~/.Athena/projects/fidus）的工作流过程件：
+# 工作状态一律在状态根、不进本仓库。此处仅解除跟踪（git rm --cached），
+# 工作树文件保留原地；权威副本见状态根对应工作项。
+docs/drafts/P4-fidus-test.md
+docs/drafts/P5-output-mutation-recovery.md
+docs/drafts/complete-state-hardening.md
+docs/drafts/no-display-boundary-closure.md
+docs/proposals/P3-L10-gradient-field.md
+docs/proposals/P3-fractional-scale-robustness.md
+docs/proposals/P4-fidus-test-subproject.md
+docs/proposals/P5-manual-output-recovery.md
+docs/proposals/P5-output-mutation-recovery.md
+docs/proposals/core-hardening-followup.md
