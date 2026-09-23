@@ -9,6 +9,7 @@
 //! Python boundary too: `estimate` only has an output direction).
 
 use fidus::prelude::*;
+use fidus::wayland::WaylandLayerBackend;
 use numpy::{PyArrayDyn, PyArrayMethods, PyUntypedArrayMethods};
 use pyo3::exceptions::{PyException, PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -115,7 +116,8 @@ impl Fidus {
 impl Fidus {
     /// Connects the layer-shell backend, probes and assembles the engine
     /// (plan P2.1). GIL released: connect + build-time screen classification
-    /// do real round-trips and two captures (~200 ms).
+    /// do real round-trips and the default classifier's four captures
+    /// (~650 ms; if only the gate verdict is needed, see [`Self::probe_gate`]).
     #[staticmethod]
     fn build_wayland(py: Python<'_>) -> PyResult<Self> {
         let engine = py
@@ -123,6 +125,29 @@ impl Fidus {
             .map_err(init_error)?;
         Ok(Self {
             engine: Some(engine),
+        })
+    }
+
+    /// Startup pre-check (receipt 7-D): the same frozen P2.1 verdict string
+    /// as [`Self::gate_status`], answered without an engine — connect +
+    /// registry bind only, zero surfaces and zero captures (~3 ms, against
+    /// the ~0.8 s of [`Self::build_wayland`]).
+    ///
+    /// Honest boundaries: the dynamic-wallpaper degradation axis requires
+    /// captures and is reported unknown here, so a `degraded:` verdict can
+    /// only come from the multi-monitor axis; `permission_required` is
+    /// unreachable — the probe answers "is the wlr-screencopy global
+    /// advertised", never portal consent. `connect_to_env` round-trips
+    /// without a timeout: a hung compositor blocks this call (GIL released,
+    /// so the host can still kill the thread) — treat it as a background
+    /// startup probe, not a UI-thread poll.
+    #[staticmethod]
+    fn probe_gate(py: Python<'_>) -> PyResult<String> {
+        py.detach(|| {
+            let mut backend = WaylandLayerBackend::connect()
+                .map_err(|e| FidusInitError::new_err(format!("no usable display: {e}")))?;
+            let gate = ProbeGate::from_environment(backend.probe_environment());
+            Ok(best_status(&gate))
         })
     }
 
@@ -146,33 +171,7 @@ impl Fidus {
             .engine
             .as_ref()
             .ok_or_else(|| FidusError::new_err("engine closed after a previous panic"))?;
-        let methods = [CalibrationMethod::Crosshair, CalibrationMethod::Anchor];
-        let mut best: Option<CalibrationStatus> = None;
-        let rank = |s: &CalibrationStatus| match s {
-            CalibrationStatus::Available { .. } => 0,
-            CalibrationStatus::Degraded { .. } => 1,
-            CalibrationStatus::PermissionRequired { .. } => 2,
-            CalibrationStatus::NotSupported { .. } => 3,
-        };
-        for m in methods {
-            let s = engine.gate().query_calibrator_availability(m);
-            if best.as_ref().is_none_or(|b| rank(&s) < rank(b)) {
-                best = Some(s);
-            }
-        }
-        Ok(match best.expect("two methods always queried") {
-            CalibrationStatus::Available { .. } => "available".to_string(),
-            CalibrationStatus::Degraded {
-                estimated_confidence,
-                ..
-            } => format!("degraded:{:.2}", estimated_confidence),
-            CalibrationStatus::PermissionRequired { permission, .. } => {
-                format!("permission_required:{}", permission.name())
-            }
-            CalibrationStatus::NotSupported { reason, .. } => {
-                format!("unsupported:{}", reason.summary())
-            }
-        })
+        Ok(best_status(engine.gate()))
     }
 
     /// Blocking calibration (seconds; H2 wall-clock unmeasured). The whole
@@ -245,6 +244,39 @@ impl Fidus {
         self.engine = Some(engine);
         let (x, y, c) = result.map_err(estimate_error)?;
         Ok(PyTuple::new(py, [x, y, c]).expect("three floats"))
+    }
+}
+
+/// Ranks {Crosshair, Anchor} on any gate and renders the frozen P2.1
+/// verdict string. Shared by the instance `gate_status` and the class-level
+/// `probe_gate` so both answer from one vocabulary.
+fn best_status(gate: &dyn Gate) -> String {
+    let methods = [CalibrationMethod::Crosshair, CalibrationMethod::Anchor];
+    let mut best: Option<CalibrationStatus> = None;
+    let rank = |s: &CalibrationStatus| match s {
+        CalibrationStatus::Available { .. } => 0,
+        CalibrationStatus::Degraded { .. } => 1,
+        CalibrationStatus::PermissionRequired { .. } => 2,
+        CalibrationStatus::NotSupported { .. } => 3,
+    };
+    for m in methods {
+        let s = gate.query_calibrator_availability(m);
+        if best.as_ref().is_none_or(|b| rank(&s) < rank(b)) {
+            best = Some(s);
+        }
+    }
+    match best.expect("two methods always queried") {
+        CalibrationStatus::Available { .. } => "available".to_string(),
+        CalibrationStatus::Degraded {
+            estimated_confidence,
+            ..
+        } => format!("degraded:{estimated_confidence:.2}"),
+        CalibrationStatus::PermissionRequired { permission, .. } => {
+            format!("permission_required:{}", permission.name())
+        }
+        CalibrationStatus::NotSupported { reason, .. } => {
+            format!("unsupported:{}", reason.summary())
+        }
     }
 }
 
