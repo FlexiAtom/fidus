@@ -23,10 +23,11 @@ crate-type = ["cdylib", "rlib"]
 [features]
 # maturin / release builds use the default (extension-module). Tests must
 # run `cargo test --no-default-features` so pyo3 links libpython and the
-# auto-initialize fixture can embed an interpreter.
+# auto-initialize fixture can embed an interpreter. abi3-py310 is on the
+# dependency (not behind a feature), so tests also exercise the ABI3 path.
 default = ["pyo3/extension-module"]
 
 [dependencies]
 fidus = { path = "../fidus", default-features = false, features = ["wayland-layer"] }
 numpy = "0.27"
-pyo3 = { version = "0.27", features = ["auto-initialize"] }
+pyo3 = { version = "0.27", features = ["auto-initialize", "abi3-py310"] }
