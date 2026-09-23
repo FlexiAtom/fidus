@@ -62,13 +62,14 @@ pub(crate) struct Session {
     pub cp_y_invert: bool,
     pub cp_ready: bool,
     pub cp_failed: bool,
-    /// Lifecycle of the screencopy buffer. `ready` is deliberately not reuse permission.
-    pub cp_buffer_state: BufferState,
-    pub cp_buffer: Option<wl_buffer::WlBuffer>,
-    pub marker_buffer: Option<wl_buffer::WlBuffer>,
-    pub clear_buffer: Option<wl_buffer::WlBuffer>,
-    pub marker_buffer_state: BufferState,
-    pub clear_buffer_state: BufferState,
+    /// Two slots per role (double-buffered like any real client): a slot may
+    /// be re-attached only after its `release`, which the compositor sends
+    /// when the *other* slot replaces it. niri never releases a buffer that is
+    /// still the surface's current content, so single-slot reuse deadlocks.
+    pub marker_buffers: [Option<wl_buffer::WlBuffer>; 2],
+    pub clear_buffers: [Option<wl_buffer::WlBuffer>; 2],
+    pub marker_buffer_state: [BufferState; 2],
+    pub clear_buffer_state: [BufferState; 2],
 }
 
 /// State tracked for every reusable wl_buffer.
@@ -137,12 +138,10 @@ impl Session {
             cp_y_invert: false,
             cp_ready: false,
             cp_failed: false,
-            cp_buffer_state: BufferState::Idle,
-            cp_buffer: None,
-            marker_buffer: None,
-            clear_buffer: None,
-            marker_buffer_state: BufferState::Idle,
-            clear_buffer_state: BufferState::Idle,
+            marker_buffers: [None, None],
+            clear_buffers: [None, None],
+            marker_buffer_state: [BufferState::Idle; 2],
+            clear_buffer_state: [BufferState::Idle; 2],
         }
     }
 
@@ -363,14 +362,15 @@ impl Dispatch<wl_buffer::WlBuffer, ()> for Session {
         if !matches!(event, wl_buffer::Event::Release) {
             return;
         }
-        if state.cp_buffer.as_ref().is_some_and(|b| b == buffer) {
-            state.cp_buffer_state = BufferState::Released;
-        }
-        if state.marker_buffer.as_ref().is_some_and(|b| b == buffer) {
-            state.marker_buffer_state = BufferState::Released;
-        }
-        if state.clear_buffer.as_ref().is_some_and(|b| b == buffer) {
-            state.clear_buffer_state = BufferState::Released;
+        for (slot, state) in state
+            .marker_buffers
+            .iter()
+            .zip(&mut state.marker_buffer_state)
+            .chain(state.clear_buffers.iter().zip(&mut state.clear_buffer_state))
+        {
+            if slot.as_ref().is_some_and(|b| b == buffer) {
+                *state = BufferState::Released;
+            }
         }
     }
 }
@@ -421,15 +421,9 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, ()> for Session {
             }
             Ev::Ready { .. } => {
                 state.cp_ready = true;
-                if state.cp_buffer_state == BufferState::Submitted {
-                    state.cp_buffer_state = BufferState::Ready;
-                }
             }
             Ev::Failed => {
                 state.cp_failed = true;
-                if state.cp_buffer_state == BufferState::Submitted {
-                    state.cp_buffer_state = BufferState::Failed;
-                }
             }
             _ => {}
         }

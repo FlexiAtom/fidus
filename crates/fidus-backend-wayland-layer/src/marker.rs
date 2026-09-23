@@ -44,14 +44,19 @@ pub(crate) struct Projector {
     surface: wl_surface::WlSurface,
     layer_surface: ZwlrLayerSurfaceV1,
     buffers: Option<MarkerBuffers>,
+    /// Per-role attach counters selecting the double-buffer slot (parity).
+    marker_seq: u64,
+    clear_seq: u64,
     destroyed: bool,
     poisoned: bool,
 }
 
 struct MarkerBuffers {
     shm_pool: ShmPool,
-    marker: wl_buffer::WlBuffer,
-    clear: wl_buffer::WlBuffer,
+    /// Two buffers per role: a slot is only re-attached once the compositor
+    /// released it (which happens when the other slot replaces it).
+    marker: [wl_buffer::WlBuffer; 2],
+    clear: [wl_buffer::WlBuffer; 2],
     /// Buffer edge length in pixels (== logical size; buffer scale is 1).
     size: u32,
     rgba: [u8; 4],
@@ -162,7 +167,15 @@ pub(crate) fn open(l: &mut Loop) -> Result<(Projector, (f64, f64)), MarkerError>
         );
     }
 
-    let projector = Projector { surface, layer_surface, buffers: None, destroyed: false, poisoned: false };
+    let projector = Projector {
+        surface,
+        layer_surface,
+        buffers: None,
+        marker_seq: 0,
+        clear_seq: 0,
+        destroyed: false,
+        poisoned: false,
+    };
     Ok((projector, hint))
 }
 
@@ -186,10 +199,15 @@ pub(crate) fn destroy(l: &mut Loop, projector: &mut Projector) -> Result<(), Mar
     projector.layer_surface.destroy();
     projector.surface.destroy();
     if let Some(b) = projector.buffers.take() {
-        b.marker.destroy();
-        b.clear.destroy();
+        for buf in b.marker.iter().chain(b.clear.iter()) {
+            buf.destroy();
+        }
         b.shm_pool.destroy(&l.conn);
     }
+    l.st.marker_buffers = [None, None];
+    l.st.clear_buffers = [None, None];
+    l.st.marker_buffer_state = [BufferState::Idle; 2];
+    l.st.clear_buffer_state = [BufferState::Idle; 2];
     projector.destroyed = true;
     l.st.layer_surface = None;
     l.st.overlay_surface = None;
@@ -229,9 +247,27 @@ pub(crate) fn show(
     let left = left_f as i32;
     let top = top_f as i32;
     projector.layer_surface.set_margin(top, 0, 0, left);
-    let generation = l.st.configure_generation;
+    // A configure is only sent when the compositor sees a change in the
+    // layer surface state, and margin moves alone do not qualify: niri
+    // measured-sends nothing when consecutive markers share size and anchor
+    // (wire evidence: second show with identical set_size/set_anchor got no
+    // configure and timed out). Nudge the requested size so every move
+    // produces a configure; the buffer-backed size is unchanged, so the
+    // compositor clamps it back and the attached content always matches the
+    // requested geometry.
+    let gen_a = l.st.configure_generation;
+    let nudge = if size > 1 { size - 1 } else { size + 1 };
+    projector.layer_surface.set_size(nudge, nudge);
     surface.commit();
-    l.wait_for(Duration::from_secs(2), |st| st.closed || st.configure_generation > generation)
+    l.wait_for(Duration::from_secs(2), |st| st.closed || st.configure_generation > gen_a)
+        .map_err(|_| MarkerError::Timeout)?;
+    if l.st.closed {
+        return Err(MarkerError::Closed);
+    }
+    let gen_b = l.st.configure_generation;
+    projector.layer_surface.set_size(size, size);
+    surface.commit();
+    l.wait_for(Duration::from_secs(2), |st| st.closed || st.configure_generation > gen_b)
         .map_err(|_| MarkerError::Timeout)?;
     if l.st.closed {
         return Err(MarkerError::Closed);
@@ -260,18 +296,48 @@ fn attach_and_settle(
     let size = projector.buffers.as_ref().expect("buffers allocated").size;
 
     for _ in 0..SETTLE_FRAMES {
+        // Double-buffer slot choice: this attach uses the slot the *other*
+        // role-neutral counter step vacated; re-attaching a slot is gated on
+        // its release, which arrives when the other slot replaced it.
+        let seq = if marker_visible {
+            projector.marker_seq
+        } else {
+            projector.clear_seq
+        };
+        if marker_visible {
+            projector.marker_seq += 1;
+        } else {
+            projector.clear_seq += 1;
+        }
+        let idx = (seq % 2) as usize;
         let buffers = projector.buffers.as_ref().expect("buffers allocated");
-        let buf = if marker_visible { &buffers.marker } else { &buffers.clear };
-        let state = if marker_visible { l.st.marker_buffer_state } else { l.st.clear_buffer_state };
-        if !state.may_reuse() {
-            return Err(MarkerError::Backend("marker buffer is still in use".into()));
+        let buf = if marker_visible { &buffers.marker[idx] } else { &buffers.clear[idx] };
+
+        // Reuse gate: wait for this slot's release (a fresh slot is Idle).
+        // The frame-callback-presented frame above already replaced it with
+        // the other slot, so on spec-correct compositors this returns fast.
+        l.wait_for(Duration::from_secs(2), |st| {
+            let state = if marker_visible {
+                st.marker_buffer_state[idx]
+            } else {
+                st.clear_buffer_state[idx]
+            };
+            state.may_reuse() || st.closed
+        })
+        .map_err(|_| {
+            projector.poisoned = true;
+            MarkerError::Timeout
+        })?;
+        if l.st.closed {
+            projector.poisoned = true;
+            return Err(MarkerError::Closed);
         }
         if marker_visible {
-            l.st.marker_buffer = Some(buf.clone());
-            l.st.marker_buffer_state = BufferState::Submitted;
+            l.st.marker_buffers[idx] = Some(buf.clone());
+            l.st.marker_buffer_state[idx] = BufferState::Submitted;
         } else {
-            l.st.clear_buffer = Some(buf.clone());
-            l.st.clear_buffer_state = BufferState::Submitted;
+            l.st.clear_buffers[idx] = Some(buf.clone());
+            l.st.clear_buffer_state[idx] = BufferState::Submitted;
         }
 
         // frame 请求必须与 attach 同一批次先于 commit 发出；否则后续裸提交
@@ -293,24 +359,9 @@ fn attach_and_settle(
             projector.poisoned = true;
             return Err(MarkerError::Closed);
         }
-        // A frame callback only reports presentation. The attached wl_buffer
-        // remains compositor-owned until its independent release event.
-        l.wait_for(Duration::from_secs(2), |st| {
-            let released = if marker_visible {
-                st.marker_buffer_state == BufferState::Released
-            } else {
-                st.clear_buffer_state == BufferState::Released
-            };
-            released || st.closed
-        })
-        .map_err(|_| {
-            projector.poisoned = true;
-            MarkerError::Timeout
-        })?;
-        if l.st.closed {
-            projector.poisoned = true;
-            return Err(MarkerError::Closed);
-        }
+        // No release wait here: presentation (frame callback) is what the
+        // marker's visibility guarantee needs; the buffer's release is
+        // consumed later by the reuse gate above, not on this critical path.
     }
     Ok(())
 }
@@ -332,12 +383,6 @@ fn ensure_buffers(
         if b.size == size && b.rgba == style.rgba {
             return Ok(());
         }
-        if !l.st.marker_buffer_state.may_reuse() || !l.st.clear_buffer_state.may_reuse()
-        {
-            return Err(MarkerError::Backend(
-                "cannot replace marker buffers before wl_buffer.release".into(),
-            ));
-        }
     }
 
     let shm: wl_shm::WlShm = l
@@ -351,8 +396,9 @@ fn ensure_buffers(
     let plane = stride
         .checked_mul(size as usize)
         .ok_or_else(|| MarkerError::Backend("marker plane overflow".into()))?;
+    // Two double-buffered planes per role; the two clear planes stay zeroed.
     let pool_size = plane
-        .checked_mul(2)
+        .checked_mul(4)
         .ok_or_else(|| MarkerError::Backend("marker pool overflow".into()))?;
     if stride > i32::MAX as usize || plane > i32::MAX as usize {
         return Err(MarkerError::Backend("marker geometry exceeds protocol limits".into()));
@@ -360,39 +406,46 @@ fn ensure_buffers(
     let mut shm_pool =
         ShmPool::create(&shm, pool_size, &l.st.qh).map_err(|e| MarkerError::Backend(e.to_string()))?;
 
-    // Solid marker half; the transparent half stays zeroed.
+    // Solid marker planes at offsets 0 and `plane`; the transparent planes
+    // stay zeroed.
     let mmap = shm_pool.mmap.as_mut();
-    for i in 0..plane / 4 {
-        mmap[i * 4..i * 4 + 4].copy_from_slice(&argb_bytes(style.rgba));
+    for plane_base in [0usize, plane] {
+        for i in 0..plane / 4 {
+            mmap[plane_base + i * 4..plane_base + i * 4 + 4].copy_from_slice(&argb_bytes(style.rgba));
+        }
     }
 
-    let marker = shm_pool.pool.create_buffer(
-        0,
-        size as i32,
-        size as i32,
-        stride as i32,
-        wl_shm::Format::Argb8888,
-        &l.st.qh,
-        (),
-    );
-    let clear = shm_pool.pool.create_buffer(
-        plane as i32,
-        size as i32,
-        size as i32,
-        stride as i32,
-        wl_shm::Format::Argb8888,
-        &l.st.qh,
-        (),
-    );
+    let buffer_at = |offset: usize| {
+        shm_pool.pool.create_buffer(
+            offset as i32,
+            size as i32,
+            size as i32,
+            stride as i32,
+            wl_shm::Format::Argb8888,
+            &l.st.qh,
+            (),
+        )
+    };
+    let marker = [buffer_at(0), buffer_at(plane)];
+    let clear = [buffer_at(plane * 2), buffer_at(plane * 3)];
 
     if let Some(old) = projector
         .buffers
         .replace(MarkerBuffers { shm_pool, marker, clear, size, rgba: style.rgba })
     {
-        old.marker.destroy();
-        old.clear.destroy();
+        // Destroying compositor-held buffers is legal; the compositor keeps
+        // its own reference until it is done with each plane.
+        for b in old.marker.iter().chain(old.clear.iter()) {
+            b.destroy();
+        }
         old.shm_pool.destroy(&l.conn);
     }
+    projector.marker_seq = 0;
+    projector.clear_seq = 0;
+    l.st.marker_buffers = [None, None];
+    l.st.clear_buffers = [None, None];
+    l.st.marker_buffer_state = [BufferState::Idle; 2];
+    l.st.clear_buffer_state = [BufferState::Idle; 2];
     Ok(())
 }
 

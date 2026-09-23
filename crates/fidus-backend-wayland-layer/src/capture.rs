@@ -7,27 +7,26 @@
 
 use std::time::Duration;
 
-use wayland_client::protocol::{wl_buffer, wl_shm};
+use wayland_client::protocol::wl_shm;
 use fidus_core::io::{CaptureError, Frame, PixelFormat};
 
-use crate::session::{BufferState, Loop};
+use crate::session::Loop;
 use crate::shm::ShmPool;
 
-/// How long to wait for screencopy events before giving up.
-const CAPTURE_TIMEOUT: Duration = Duration::from_secs(2);
-
-/// Reusable capture buffer: one pool, one buffer, sized to the last frame.
-/// Reuse is safe only after the compositor sends `wl_buffer.release`; `ready`
-/// only means that the pixels can be read.
-pub(crate) struct CopyBuffer {
-    shm_pool: ShmPool,
-    buffer: wl_buffer::WlBuffer,
-    /// (format, width, height, stride) the buffer was created for.
-    params: (PixelFormat, u32, u32, u32),
-}
+/// How long to wait for screencopy events before giving up. A cursor-hidden
+/// copy measured <100 ms on niri/wlroots; the budget is headroom for slow
+/// compositors, and only a *failed* capture ever pays it.
+const CAPTURE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Captures the first bound output into a top-down [`Frame`].
-pub(crate) fn capture(l: &mut Loop, cache: &mut Option<CopyBuffer>) -> Result<Frame, CaptureError> {
+///
+/// Buffers are allocated fresh per capture and destroyed once the copy is
+/// complete. Reusing a screencopy buffer would require `wl_buffer.release`,
+/// which niri 26.04 never sends for screencopy buffers (measured on the wire,
+/// 2026-09-23) — a reuse-based state machine poisons the whole session there.
+/// Fresh allocation is compositor-independent: the client is always done with
+/// the mapping before the next copy, and the compositor holds its own fd.
+pub(crate) fn capture(l: &mut Loop) -> Result<Frame, CaptureError> {
     let manager = l
         .st
         .screencopy
@@ -40,14 +39,13 @@ pub(crate) fn capture(l: &mut Loop, cache: &mut Option<CopyBuffer>) -> Result<Fr
         .cloned()
         .ok_or_else(|| CaptureError::Backend("no output bound".into()))?;
 
-    if cache.is_some() && !matches!(l.st.cp_buffer_state, BufferState::Idle | BufferState::Released) {
-        l.wait_for(CAPTURE_TIMEOUT, |st| {
-            matches!(st.cp_buffer_state, BufferState::Released | BufferState::Idle)
-        })
-        .map_err(|_| CaptureError::Timeout)?;
-    }
     l.st.reset_screencopy();
-    let frame = manager.capture_output(0, &output, &l.st.qh, ());
+    // cursor_hidden = 1. Two reasons, both measured on niri 26.04:
+    // an output-with-cursor copy only completes on the *next* compositor
+    // re-render (4.6–11.6 s on an idle screen), and cursor pixels overlaid
+    // on the tracked area are noise for the detector anyway — no fidus
+    // feature reads the cursor.
+    let frame = manager.capture_output(1, &output, &l.st.qh, ());
 
     // The compositor announces the buffer geometry it will copy into.
     l.wait_for(CAPTURE_TIMEOUT, |st| st.cp_size.is_some())
@@ -67,55 +65,48 @@ pub(crate) fn capture(l: &mut Loop, cache: &mut Option<CopyBuffer>) -> Result<Fr
         .checked_mul(height as usize)
         .ok_or_else(|| CaptureError::Failed("capture buffer size overflow".into()))?;
     if byte_size == 0 || width == 0 || height == 0 || stride_usize < min_stride {
+        frame.destroy();
         return Err(CaptureError::Failed("compositor announced invalid frame geometry".into()));
     }
     if width > i32::MAX as u32 || height > i32::MAX as u32 || stride > i32::MAX as u32 {
+        frame.destroy();
         return Err(CaptureError::Failed("capture geometry exceeds wl_shm limits".into()));
     }
 
-    // Rebuild the pool only when the announced geometry changed.
-    let reuse = cache
-        .as_ref()
-        .is_some_and(|c| c.params == (format, width, height, stride));
-    if !reuse {
-        let shm = l
-            .st
-            .shm
-            .clone()
-            .ok_or_else(|| CaptureError::Backend("wl_shm not bound".into()))?;
-        let shm_pool = ShmPool::create(&shm, byte_size, &l.st.qh)
-            .map_err(|e| CaptureError::Backend(e.to_string()))?;
-        let buffer = shm_pool.pool.create_buffer(
-            0,
-            width as i32,
-            height as i32,
-            stride as i32,
-            shm_format_of(format),
-            &l.st.qh,
-            (),
-        );
-        *cache = Some(CopyBuffer { shm_pool, buffer, params: (format, width, height, stride) });
-        l.st.cp_buffer = cache.as_ref().map(|c| c.buffer.clone());
-        l.st.cp_buffer_state = BufferState::Idle;
-    }
-    let cached = cache.as_mut().expect("just created");
-    if l.st.cp_buffer.as_ref().is_some_and(|b| b == &cached.buffer)
-        && !matches!(l.st.cp_buffer_state, BufferState::Idle | BufferState::Released)
-    {
-        return Err(CaptureError::Failed("capture buffer is still in use".into()));
-    }
-    l.st.cp_buffer = Some(cached.buffer.clone());
-    l.st.cp_buffer_state = BufferState::Submitted;
+    let shm = l
+        .st
+        .shm
+        .clone()
+        .ok_or_else(|| CaptureError::Backend("wl_shm not bound".into()))?;
+    let shm_pool = ShmPool::create(&shm, byte_size, &l.st.qh)
+        .map_err(|e| { frame.destroy(); CaptureError::Backend(e.to_string()) })?;
+    let buffer = shm_pool.pool.create_buffer(
+        0,
+        width as i32,
+        height as i32,
+        stride as i32,
+        shm_format_of(format),
+        &l.st.qh,
+        (),
+    );
 
-    frame.copy(&cached.buffer);
-    l.wait_for(CAPTURE_TIMEOUT, |st| st.cp_ready || st.cp_failed)
-        .map_err(|_| CaptureError::Timeout)?;
-    if l.st.cp_failed {
-        return Err(CaptureError::Failed("compositor refused the copy".into()));
+    frame.copy(&buffer);
+    let copy_done = l.wait_for(CAPTURE_TIMEOUT, |st| st.cp_ready || st.cp_failed);
+    if copy_done.is_err() || l.st.cp_failed {
+        buffer.destroy();
+        shm_pool.destroy(&l.conn);
+        frame.destroy();
+        return if copy_done.is_err() {
+            Err(CaptureError::Timeout)
+        } else {
+            Err(CaptureError::Failed("compositor refused the copy".into()))
+        };
     }
 
-    let src = cached.shm_pool.mmap.as_slice().to_vec();
+    let src = shm_pool.mmap.as_slice().to_vec();
     frame.destroy();
+    buffer.destroy();
+    shm_pool.destroy(&l.conn);
     let data = if l.st.cp_y_invert {
         flip_rows(&src, height, stride)
     } else {

@@ -34,11 +34,10 @@ use fidus_core::io::{
 use session::Loop;
 
 /// The connected backend. One instance owns one Wayland connection; sessions
-/// ([`CalibrationIo`] / [`CaptureIo`]) borrow it for their lifetime. The
-/// screencopy buffer is allocated once and reused across sessions.
+/// ([`CalibrationIo`] / [`CaptureIo`]) borrow it for their lifetime. Capture
+/// buffers are allocated per frame (see `capture`), nothing is cached.
 pub struct WaylandLayerBackend {
     l: Loop,
-    copy_cache: Option<capture::CopyBuffer>,
 }
 
 impl WaylandLayerBackend {
@@ -55,7 +54,7 @@ impl WaylandLayerBackend {
             .map_err(|e| BackendError::Protocol(e.to_string()))?;
         eq.roundtrip(&mut st)
             .map_err(|e| BackendError::Protocol(e.to_string()))?;
-        Ok(WaylandLayerBackend { l: Loop { conn, eq, st }, copy_cache: None })
+        Ok(WaylandLayerBackend { l: Loop { conn, eq, st } })
     }
 
     /// Whether the compositor exposes all primitives this backend needs.
@@ -90,7 +89,7 @@ impl WaylandLayerBackend {
 
     /// Captures the primary output once (diagnostics / backend smoke tests).
     pub fn capture_once(&mut self) -> Result<Frame, CaptureError> {
-        capture::capture(&mut self.l, &mut self.copy_cache)
+        capture::capture(&mut self.l)
     }
 }
 
@@ -144,12 +143,11 @@ impl From<BackendError> for MarkerError {
     }
 }
 
-/// One live calibration session: holds the overlay surface and borrows the
-/// backend's capture buffer. Destroying the session drops the projector as
+/// One live calibration session: holds the overlay surface; captures allocate
+/// their own buffers. Destroying the session drops the projector as
 /// well, so the spec §4.4 teardown rule holds even on early returns.
 pub struct BackendSession<'a> {
     l: &'a mut Loop,
-    cache: &'a mut Option<capture::CopyBuffer>,
     projector: Option<marker::Projector>,
     hint: (f64, f64),
 }
@@ -163,15 +161,15 @@ impl<'a> BackendSession<'a> {
                 "compositor lacks compositor/shm/layer-shell/screencopy or has no output".into(),
             ));
         }
-        let WaylandLayerBackend { l, copy_cache } = backend;
+        let WaylandLayerBackend { l } = backend;
         let (projector, hint) = marker::open(l).map_err(marker_err)?;
-        Ok(BackendSession { l, cache: copy_cache, projector: Some(projector), hint })
+        Ok(BackendSession { l, projector: Some(projector), hint })
     }
 }
 
 impl CaptureIo for BackendSession<'_> {
     fn capture(&mut self) -> Result<Frame, CaptureError> {
-        capture::capture(self.l, self.cache)
+        capture::capture(self.l)
     }
 }
 
@@ -219,12 +217,11 @@ impl Drop for BackendSession<'_> {
 /// projector, no layer-shell interaction at all.
 pub struct CaptureSession<'a> {
     l: &'a mut Loop,
-    cache: &'a mut Option<capture::CopyBuffer>,
 }
 
 impl CaptureIo for CaptureSession<'_> {
     fn capture(&mut self) -> Result<Frame, CaptureError> {
-        capture::capture(self.l, self.cache)
+        capture::capture(self.l)
     }
 }
 
@@ -239,8 +236,8 @@ impl IoFactory for WaylandLayerBackend {
                 "compositor lacks screencopy or has no output".into(),
             ));
         }
-        let WaylandLayerBackend { l, copy_cache } = self;
-        Ok(Box::new(CaptureSession { l, cache: copy_cache }))
+        let WaylandLayerBackend { l } = self;
+        Ok(Box::new(CaptureSession { l }))
     }
 }
 
