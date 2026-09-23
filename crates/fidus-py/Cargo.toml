@@ -1,0 +1,32 @@
+[package]
+name = "fidus-py"
+description = "Python bindings (Stage 1 vertical slice) for the fidus zero-trust positioning engine"
+version = "0.1.0-dev.0" # maturin surfaces this as PEP440 `0.1.0.dev0`
+edition = "2024"
+rust-version = "1.86"
+license = "Apache-2.0"
+
+# Standalone package: deliberately NOT a member of the fidus workspace.
+# Failure mode this guards against: joining the workspace would force the
+# offline CI vendor store (vendor/) to grow the whole pyo3 dependency tree
+# and change the existing workspace gate surface. Unreachable if we stay
+# out; the binding is built locally with maturin instead (plan P1).
+[workspace]
+
+[lib]
+# Crate name differs from the Python module name (`fidus`, fixed by the
+# `#[pyo3(name = "fidus")]` init symbol): sharing the dependency's name
+# `fidus` makes rustdoc/doctest extern resolution ambiguous (E0464).
+name = "fidus_py"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# maturin / release builds use the default (extension-module). Tests must
+# run `cargo test --no-default-features` so pyo3 links libpython and the
+# auto-initialize fixture can embed an interpreter.
+default = ["pyo3/extension-module"]
+
+[dependencies]
+fidus = { path = "../fidus", default-features = false, features = ["wayland-layer"] }
+numpy = "0.27"
+pyo3 = { version = "0.27", features = ["auto-initialize"] }

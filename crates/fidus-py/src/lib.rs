@@ -1,0 +1,398 @@
+// Copyright 2026 Flexiatom
+// SPDX-License-Identifier: Apache-2.0
+
+//! `fidus-py` — Stage 1 Python binding for the fidus zero-trust positioning
+//! engine (plan `meapet-embed-contract`, frozen surface P2).
+//!
+//! Exposes exactly one engine object plus a read-only calibration summary;
+//! the binding never accepts coordinates (spec §6 zero-trust holds at the
+//! Python boundary too: `estimate` only has an output direction).
+
+use fidus::prelude::*;
+use numpy::{PyArrayDyn, PyArrayMethods, PyUntypedArrayMethods};
+use pyo3::exceptions::{PyException, PyTypeError, PyValueError};
+use pyo3::prelude::*;
+use pyo3::types::PyTuple;
+
+pyo3::create_exception!(fidus, FidusError, PyException);
+pyo3::create_exception!(fidus, FidusInitError, FidusError);
+pyo3::create_exception!(fidus, FidusCalibrationError, FidusError);
+pyo3::create_exception!(fidus, FidusEstimateError, FidusError);
+pyo3::create_exception!(fidus, FidusNotCalibrated, FidusEstimateError);
+pyo3::create_exception!(fidus, FidusNoTarget, FidusEstimateError);
+pyo3::create_exception!(fidus, FidusTargetLost, FidusEstimateError);
+pyo3::create_exception!(fidus, FidusUntrackable, FidusEstimateError);
+
+fn init_error(e: InitError) -> PyErr {
+    FidusInitError::new_err(e.to_string())
+}
+
+fn calibration_error(e: CalibrationError) -> PyErr {
+    FidusCalibrationError::new_err(e.to_string())
+}
+
+/// Maps every `EstimateError` variant to its frozen exception class
+/// (plan P2.4); the message is the Rust `Display` string verbatim — never
+/// reworded here, so the binding cannot drift from the engine's honesty.
+fn estimate_error(e: EstimateError) -> PyErr {
+    let msg = e.to_string();
+    match &e {
+        EstimateError::NotCalibrated => FidusNotCalibrated::new_err(msg),
+        EstimateError::NoTarget => FidusNoTarget::new_err(msg),
+        EstimateError::TargetLost => FidusTargetLost::new_err(msg),
+        EstimateError::UntrackableTarget { .. } => FidusUntrackable::new_err(msg),
+        _ => FidusEstimateError::new_err(msg),
+    }
+}
+
+/// Read-only summary of one calibration (plan P2.2). Pure data, no engine
+/// borrow: the overlay is already destroyed when this crosses to Python.
+#[pyclass(get_all, module = "fidus")]
+#[derive(Clone)]
+struct CalibInfo {
+    scale: f64,
+    rms_residual_px: f64,
+    max_residual_px: f64,
+    verification_max_err_px: f64,
+    consistency_max_err_px: f64,
+    sample_count: usize,
+    independent_passes: usize,
+}
+
+#[pymethods]
+impl CalibInfo {
+    fn __repr__(&self) -> String {
+        format!(
+            "CalibInfo(scale={:.3}, rms_residual_px={:.3}, max_residual_px={:.3}, \
+             verification_max_err_px={:.3}, consistency_max_err_px={:.3}, \
+             sample_count={}, independent_passes={})",
+            self.scale,
+            self.rms_residual_px,
+            self.max_residual_px,
+            self.verification_max_err_px,
+            self.consistency_max_err_px,
+            self.sample_count,
+            self.independent_passes,
+        )
+    }
+}
+
+/// Frozen plain-data mirror of [`CalibInfo`], safe to carry across
+/// `Python::detach` (all fields `Send + Copy`).
+struct CalibData {
+    scale: f64,
+    rms_residual_px: f64,
+    max_residual_px: f64,
+    verification_max_err_px: f64,
+    consistency_max_err_px: f64,
+    sample_count: usize,
+    independent_passes: usize,
+}
+
+#[pyclass(unsendable, module = "fidus")]
+struct Fidus {
+    /// `Option` because the blocking calls `take()` the engine into a
+    /// `Python::detach` closure and restore it afterwards.
+    ///
+    /// Failure mode this tolerates: a Rust panic inside the closure aborts
+    /// or unwinds before the restore — the subsequent call then sees `None`
+    /// and raises instead of running on a half-known engine. The engine is
+    /// `Send` (all four core traits require it), which is exactly what the
+    /// move-out pattern relies on; if a future core change drops a `Send`
+    /// bound, this file stops compiling, which is the intended alarm.
+    engine: Option<FidusEngine>,
+}
+
+impl Fidus {
+    fn take_engine(&mut self) -> PyResult<FidusEngine> {
+        self.engine
+            .take()
+            .ok_or_else(|| FidusError::new_err("engine closed after a previous panic"))
+    }
+}
+
+#[pymethods]
+impl Fidus {
+    /// Connects the layer-shell backend, probes and assembles the engine
+    /// (plan P2.1). GIL released: connect + build-time screen classification
+    /// do real round-trips and two captures (~200 ms).
+    #[staticmethod]
+    fn build_wayland(py: Python<'_>) -> PyResult<Self> {
+        let engine = py
+            .detach(|| FidusBuilder::new().build_with(BackendChoice::WaylandLayer))
+            .map_err(init_error)?;
+        Ok(Self {
+            engine: Some(engine),
+        })
+    }
+
+    fn __repr__(&self) -> String {
+        let calibrated = self
+            .engine
+            .as_ref()
+            .map(|e| e.frame().is_some())
+            .unwrap_or(false);
+        format!(
+            "<fidus.Fidus calibrated={}>",
+            if calibrated { "yes" } else { "no" }
+        )
+    }
+
+    /// Best of {Crosshair, Anchor} per plan P2.1 (Available > Degraded >
+    /// PermissionRequired > NotSupported, Crosshair wins ties). Pure env
+    /// lookup — no capture, so it keeps the GIL.
+    fn gate_status(&self) -> PyResult<String> {
+        let engine = self
+            .engine
+            .as_ref()
+            .ok_or_else(|| FidusError::new_err("engine closed after a previous panic"))?;
+        let methods = [CalibrationMethod::Crosshair, CalibrationMethod::Anchor];
+        let mut best: Option<CalibrationStatus> = None;
+        let rank = |s: &CalibrationStatus| match s {
+            CalibrationStatus::Available { .. } => 0,
+            CalibrationStatus::Degraded { .. } => 1,
+            CalibrationStatus::PermissionRequired { .. } => 2,
+            CalibrationStatus::NotSupported { .. } => 3,
+        };
+        for m in methods {
+            let s = engine.gate().query_calibrator_availability(m);
+            if best.as_ref().is_none_or(|b| rank(&s) < rank(b)) {
+                best = Some(s);
+            }
+        }
+        Ok(match best.expect("two methods always queried") {
+            CalibrationStatus::Available { .. } => "available".to_string(),
+            CalibrationStatus::Degraded {
+                estimated_confidence,
+                ..
+            } => format!("degraded:{:.2}", estimated_confidence),
+            CalibrationStatus::PermissionRequired { permission, .. } => {
+                format!("permission_required:{}", permission.name())
+            }
+            CalibrationStatus::NotSupported { reason, .. } => {
+                format!("unsupported:{}", reason.summary())
+            }
+        })
+    }
+
+    /// Blocking calibration (seconds; H2 wall-clock unmeasured). The whole
+    /// call runs with the GIL released; callers must not invoke it from a
+    /// thread that must stay responsive (draft D4 F-2).
+    fn calibrate_once(&mut self, py: Python<'_>) -> PyResult<CalibInfo> {
+        let mut engine = self.take_engine()?;
+        let (engine, result) = py.detach(move || {
+            let out = engine.calibrate().map(|frame| {
+                let q = frame.quality();
+                CalibData {
+                    scale: frame.map().linear_scale(),
+                    rms_residual_px: q.rms_residual_px,
+                    max_residual_px: q.max_residual_px,
+                    verification_max_err_px: q.verification_max_err_px,
+                    consistency_max_err_px: q.consistency_max_err_px,
+                    sample_count: q.sample_count,
+                    independent_passes: q.independent_passes,
+                }
+            });
+            (engine, out)
+        });
+        self.engine = Some(engine);
+        let d = result.map_err(calibration_error)?;
+        Ok(CalibInfo {
+            scale: d.scale,
+            rms_residual_px: d.rms_residual_px,
+            max_residual_px: d.max_residual_px,
+            verification_max_err_px: d.verification_max_err_px,
+            consistency_max_err_px: d.consistency_max_err_px,
+            sample_count: d.sample_count,
+            independent_passes: d.independent_passes,
+        })
+    }
+
+    /// Registers the caller's own offscreen render. The pixel buffer is
+    /// **copied** into the engine (draft D4 F-5): a zero-copy borrow would
+    /// let the host mutate a live template by reusing its frame buffer,
+    /// which the type system could not catch after the handoff.
+    ///
+    /// Input validation order and messages are frozen in plan P2.1; every
+    /// rejection is `TypeError`/`ValueError` (host-side input faults, not
+    /// engine behaviour) and nothing is clamped, transposed or padded.
+    #[pyo3(signature = (img, ambiguous = false))]
+    fn register_target(&mut self, img: &Bound<'_, PyAny>, ambiguous: bool) -> PyResult<()> {
+        let image = parse_rgba(img)?;
+        let engine = self
+            .engine
+            .as_mut()
+            .ok_or_else(|| FidusError::new_err("engine closed after a previous panic"))?;
+        let mut target = TargetDescription::new(image);
+        if ambiguous {
+            target = target.tracking_ambiguous_appearance();
+        }
+        engine.register_target(target).map_err(estimate_error)
+    }
+
+    /// Steady-state estimate under the GIL-released pattern (capture is
+    /// blocking). Returns `(x, y, confidence)` in calibrated logical
+    /// pixels; `TargetLost`/`NotCalibrated` surface as exceptions, never
+    /// as sentinel values (spec §4.5 honesty rule).
+    fn estimate<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
+        let mut engine = self.take_engine()?;
+        let (engine, result) = py.detach(move || {
+            let out = engine
+                .estimate()
+                .map(|p| (p.position.x, p.position.y, p.confidence as f64));
+            (engine, out)
+        });
+        self.engine = Some(engine);
+        let (x, y, c) = result.map_err(estimate_error)?;
+        Ok(PyTuple::new(py, [x, y, c]).expect("three floats"))
+    }
+}
+
+/// Extracts a C-contiguous `(h, w, 4)` uint8 buffer per plan P2.1.
+/// Downcasting to `PyArrayDyn<u8>` fuses the "is an ndarray" and "dtype is
+/// uint8" checks; both failure classes surface as `TypeError` with the
+/// frozen message (a float32 array reaching the engine would misread every
+/// byte as a pixel).
+fn parse_rgba(img: &Bound<'_, PyAny>) -> PyResult<RgbaImage> {
+    let arr = img
+        .cast::<PyArrayDyn<u8>>()
+        .map_err(|_| PyTypeError::new_err("img must be a numpy uint8 RGBA array"))?;
+    let shape = arr.shape();
+    if arr.ndim() != 3 || shape.len() != 3 || shape[2] != 4 {
+        return Err(PyValueError::new_err("expected shape (h, w, 4)"));
+    }
+    if !arr.is_c_contiguous() {
+        return Err(PyValueError::new_err("img must be C-contiguous"));
+    }
+    let (h, w) = (shape[0] as u32, shape[1] as u32);
+    if h == 0 || w == 0 {
+        return Err(PyValueError::new_err("empty or inconsistent buffer"));
+    }
+    // `to_vec` performs the mandated copy; lengths are array-invariant here,
+    // but RgbaImage re-checks (is_valid) so a bound-crossing bug stays loud.
+    //
+    // # Safety (why the unchecked slice borrow cannot break)
+    // `as_slice` requires contiguity: checked two lines above. A host thread
+    // resizing or de-allocating the array between check and copy would break
+    // it, but the GIL is held for this whole function (no `detach` on this
+    // path), so no other Python code can run while the borrow is live.
+    let data = unsafe {
+        arr.as_slice()
+            .map_err(|_| PyValueError::new_err("img must be C-contiguous"))?
+    }
+    .to_vec();
+    let image = RgbaImage::from_raw(w, h, data);
+    if !image.is_valid() {
+        return Err(PyValueError::new_err("empty or inconsistent buffer"));
+    }
+    Ok(image)
+}
+
+#[pymodule]
+#[pyo3(name = "fidus")]
+fn init_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<Fidus>()?;
+    m.add_class::<CalibInfo>()?;
+    m.add("FidusError", m.py().get_type::<FidusError>())?;
+    m.add("FidusInitError", m.py().get_type::<FidusInitError>())?;
+    m.add("FidusCalibrationError", m.py().get_type::<FidusCalibrationError>())?;
+    m.add("FidusEstimateError", m.py().get_type::<FidusEstimateError>())?;
+    m.add("FidusNotCalibrated", m.py().get_type::<FidusNotCalibrated>())?;
+    m.add("FidusNoTarget", m.py().get_type::<FidusNoTarget>())?;
+    m.add("FidusTargetLost", m.py().get_type::<FidusTargetLost>())?;
+    m.add("FidusUntrackable", m.py().get_type::<FidusUntrackable>())?;
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    // Run with `cargo test --no-default-features`: the default feature set
+    // links no libpython (extension-module), tests embed one (auto-initialize).
+    use super::*;
+
+    fn eval_array<'py>(py: Python<'py>, src: &std::ffi::CStr) -> Bound<'py, pyo3::PyAny> {
+        let globals = pyo3::types::PyDict::new(py);
+        globals
+            .set_item("np", py.import("numpy").expect("numpy required for binding tests"))
+            .unwrap();
+        py.eval(src, Some(&globals), None).unwrap()
+    }
+
+    fn parse_err(py: Python<'_>, src: &std::ffi::CStr) -> PyErr {
+        let obj = eval_array(py, src);
+        parse_rgba(&obj).expect_err("input must be rejected")
+    }
+
+    #[test]
+    fn rejects_non_ndarray_and_wrong_dtype() {
+        Python::attach(|py| {
+            let e = parse_err(py, c"42");
+            assert!(e.is_instance_of::<PyTypeError>(py), "{e}");
+            assert_eq!(
+                e.value(py).str().unwrap().to_string(),
+                "img must be a numpy uint8 RGBA array"
+            );
+            let e = parse_err(py, c"np.zeros((2, 2, 4), dtype=np.float32)");
+            assert!(e.is_instance_of::<PyTypeError>(py), "{e}");
+        });
+    }
+
+    #[test]
+    fn rejects_shape_contiguity_and_empty() {
+        Python::attach(|py| {
+            let e = parse_err(py, c"np.zeros((2, 8), dtype=np.uint8)");
+            assert!(e.is_instance_of::<PyValueError>(py), "{e}");
+            assert_eq!(e.value(py).str().unwrap().to_string(), "expected shape (h, w, 4)");
+            let e = parse_err(py, c"np.zeros((2, 8, 3), dtype=np.uint8)");
+            assert_eq!(e.value(py).str().unwrap().to_string(), "expected shape (h, w, 4)");
+            let e = parse_err(py, c"np.zeros((8, 8, 4), dtype=np.uint8)[:, ::-1]");
+            assert_eq!(
+                e.value(py).str().unwrap().to_string(),
+                "img must be C-contiguous"
+            );
+            let e = parse_err(py, c"np.zeros((0, 4, 4), dtype=np.uint8)");
+            assert_eq!(
+                e.value(py).str().unwrap().to_string(),
+                "empty or inconsistent buffer"
+            );
+        });
+    }
+
+    #[test]
+    fn accepts_valid_rgba_and_copies() {
+        Python::attach(|py| {
+            let obj = eval_array(py, c"np.arange(2 * 3 * 4, dtype=np.uint8).reshape(2, 3, 4)");
+            let img = parse_rgba(&obj).expect("valid buffer must be accepted");
+            assert!(img.is_valid());
+            assert_eq!((img.width(), img.height(), img.byte_len()), (3, 2, 24));
+            assert_eq!(img.rgba(2, 1), [20, 21, 22, 23]);
+            // The numpy temporary is dropped here; the engine-side copy must
+            // keep the pixel intact (draft D4 F-5).
+            drop(obj);
+            assert_eq!(img.rgba(2, 1), [20, 21, 22, 23]);
+        });
+    }
+
+    #[test]
+    fn estimate_errors_map_to_frozen_classes() {
+        Python::attach(|py| {
+            let cases = [
+                (EstimateError::NotCalibrated, "FidusNotCalibrated"),
+                (EstimateError::NoTarget, "FidusNoTarget"),
+                (EstimateError::TargetLost, "FidusTargetLost"),
+            ];
+            for (err, class) in cases {
+                let msg = err.to_string();
+                let e = estimate_error(err);
+                let v = e.value(py);
+                assert_eq!(v.get_type().name().unwrap().to_string(), class);
+                assert_eq!(v.str().unwrap().to_string(), msg, "message must pass through verbatim");
+            }
+            assert!(estimate_error(EstimateError::InvalidMeasurement)
+                .value(py)
+                .is_instance(&py.get_type::<FidusEstimateError>())
+                .unwrap());
+        });
+    }
+}
