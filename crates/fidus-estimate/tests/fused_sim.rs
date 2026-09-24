@@ -294,3 +294,73 @@ fn first_search_without_target_is_target_lost() {
         Err(EstimateError::TargetLost)
     ));
 }
+
+/// One estimate with the clock advanced by `ms`, so a settle can be observed
+/// at a real host's cadence instead of the fixture's 600 ms default.
+fn step_at(
+    est: &mut FusedEstimator,
+    io: &mut FakeOutput,
+    clock: &mut Clock,
+    ms: u64,
+) -> Result<fidus_core::estimate::ProbabilisticPosition, EstimateError> {
+    clock.t += Duration::from_millis(ms);
+    let t = clock.t;
+    est.set_clock(Box::new(move || t));
+    est.estimate(io, &frame())
+}
+
+/// Re-registering is the flush a host asks for: "the target just moved and I
+/// need one clean reading now" cannot be answered by waiting out the settle,
+/// and there is no reset entry point besides this one.
+///
+/// Run in MeaPet's regime — an appearance discounted to the ceiling floor, so
+/// every reading is a weak one. The drifted leg also demonstrates the sharper
+/// half of why the ceiling exists: on a *fully* self-similar appearance the
+/// match is located by the search window, so a belief that has already walked
+/// off gets corroborated instead of corrected, and the readings keep leaving a
+/// target that is standing still. A real sprite at ceiling 0.107 does
+/// self-correct (MeaPet's control arm converges to 0.01 px); that difference
+/// belongs to the appearance, not to the filter, and this test is only about
+/// the flush.
+#[test]
+fn re_registering_the_target_flushes_the_settle_transient() {
+    let mut clock = Clock::new();
+    let shared = clock.t;
+    let mut est = FusedEstimator::with_clock(Box::new(move || shared));
+    est.register_target(
+        TargetDescription::new(gradient_template())
+            .with_initial_center(LogicalPoint::new(200.0, 150.0))
+            .tracking_ambiguous_appearance(),
+    )
+    .expect("explicit ambiguity opt-in");
+    let mut io = FakeOutput { top_left_logical: Some((170.0, 130.0)), salt: 0, gradient: true };
+    step_at(&mut est, &mut io, &mut clock, 300).expect("first fix");
+
+    // The target moves once and then stands still at logical x = 308.
+    io.top_left_logical = Some((278.0, 130.0));
+    let mut last = 308.0;
+    for _ in 0..4 {
+        last = step_at(&mut est, &mut io, &mut clock, 1270)
+            .expect("a weak measurement is still a measurement")
+            .position
+            .x;
+    }
+    assert!(
+        (last - 308.0).abs() > 20.0,
+        "the belief was supposed to be off-target before the flush, got {last}"
+    );
+
+    est.register_target(
+        TargetDescription::new(gradient_template())
+            .with_initial_center(LogicalPoint::new(308.0, 150.0))
+            .tracking_ambiguous_appearance(),
+    )
+    .expect("re-registration");
+    let p = step_at(&mut est, &mut io, &mut clock, 1270).expect("first fix after flush");
+    assert!(
+        (p.position.x - 308.0).abs() < 1.0,
+        "re-registration must snap onto the measurement, not continue the \
+         transient: x = {}, was {last}",
+        p.position.x
+    );
+}

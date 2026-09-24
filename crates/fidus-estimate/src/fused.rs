@@ -409,6 +409,79 @@ mod tests {
         }
     }
 
+    /// The settle transient `estimate` documents, measured on the filter that
+    /// produces it.
+    ///
+    /// MeaPet's probe (`probe_settle_convergence.py`: a 216 px move, ~1.27 s
+    /// between estimates, an independent on-screen ruler reading 0.00 px the
+    /// whole time) saw deviations −16.0 / +13.5 / +2.7 / −0.6 / −0.2 px. Every
+    /// measurement fed to the filter in that run was therefore *correct*, so
+    /// the question is whether the filter alone can produce that shape. It
+    /// can: at their cadence, with their ceiling-derived `r = 357 px²` and no
+    /// capture in the loop at all, the same sequence is −16.3 / +13.9 / +3.3 /
+    /// −0.6 / −0.3 px. The trailing readings are the track converging, not a
+    /// stale frame — the velocity the first correction teaches then carries the
+    /// estimate past the target, which is the sign flip on estimate 2.
+    ///
+    /// Asserted on shape and settling budget, not magnitude, so the knobs stay
+    /// tunable. What is *not* tunable without updating `estimate`'s promise of
+    /// "roughly three-to-five estimates": that the first post-step reading is
+    /// still behind, that the next overshoots, and that five is enough.
+    fn step_response(displacement: f64, dt: f64, ceiling: f32) -> Vec<f64> {
+        use crate::kalman::Kinematic1D;
+        let e = FusedEstimator::new();
+        let r = e.r_of(ceiling);
+        let mut axis = Kinematic1D::uninformative();
+        axis.reset(0.0);
+        // Settle onto a stationary target first: the transient is a property
+        // of the step, so the prior must be the steady state, not the reset.
+        for _ in 0..40 {
+            axis.predict(dt, e.process_noise);
+            axis.update(0.0, r);
+        }
+        (0..5)
+            .map(|_| {
+                axis.predict(dt, e.process_noise);
+                axis.update(displacement, r);
+                axis.position() - displacement
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_step_settles_within_five_estimates_and_scales_with_displacement() {
+        let dt = 1.27;
+        // MeaPet's template ceiling: the weakest confidence a real host ever
+        // feeds the filter, so the slowest settle. A stronger match converges
+        // faster because `r_of` shrinks `r` and the gain rises toward 1.
+        let dev = step_response(216.0, dt, 0.106_678_14);
+        assert!(dev[0] < -1.0, "first reading snapped to the step: {}", dev[0]);
+        assert!(dev[1] > 0.0, "second reading must overshoot, got {}", dev[1]);
+        assert!(
+            dev[2].abs() > dev[3].abs() && dev[3].abs() > dev[4].abs(),
+            "not decaying: {dev:?}"
+        );
+        assert!(dev[4].abs() < 1.0, "unsettled after five estimates: {dev:?}");
+
+        // The inbound probe's third question, answered by construction rather
+        // than extrapolation: the covariance recursion never sees the
+        // innovation, so the gain is fixed by `dt`, `q` and `r` alone and the
+        // whole response is proportional to how far the target jumped.
+        let first_ratio = dev[0] / 216.0;
+        let overshoot_ratio = dev[1] / 216.0;
+        for d in [27.0, 54.0, 108.0, 432.0] {
+            let s = step_response(d, dt, 0.106_678_14);
+            assert!(
+                (s[0] / d - first_ratio).abs() <= 1e-9 && (s[1] / d - overshoot_ratio).abs() <= 1e-9,
+                "{d} px step is not proportional to the 216 px one: {s:?}"
+            );
+        }
+        assert!(
+            (-0.2..-0.02).contains(&first_ratio),
+            "gain drifted out of the regime this documents: {first_ratio}"
+        );
+    }
+
     #[test]
     fn hostile_knob_settings_cannot_break_the_filter() {
         // The fields are pub, so they are untrusted input. None of these may

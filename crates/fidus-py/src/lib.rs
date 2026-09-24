@@ -260,7 +260,9 @@ impl Fidus {
     ///   is already where you put it. To tell "settled" from "still converging,"
     ///   require two adjacent matches to differ by no more than your tolerance;
     ///   a full miss (a following `coasting`/`exception`) then re-acquisition
-    ///   instead resets the track and snaps to the new position in one step.
+    ///   instead resets the track and snaps to the new position in one step, and
+    ///   so does registering the target again — which is how to ask for one
+    ///   clean reading immediately rather than waiting out the settle.
     /// * **coasting** — a prior fix exists but this frame matched nothing:
     ///   returns the Kalman-extrapolated track position with
     ///   `confidence == 0.0` and does **not** raise. Treat `confidence == 0.0`
