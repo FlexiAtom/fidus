@@ -32,7 +32,7 @@ athena complete <slug>       进行中→结束(done)；pending 反证须先清�
 athena freeze <slug> -c "…"(→结束 frozen，毙掉需原因)
 athena community <slug>      放进 community/ 请人帮忙
 athena write|append <path>   相对 ~/.Athena 的安全读写（裸状态目录路径 pool/working/… 依 --project 归位到 projects/<p>/…；写顶层请用显式全路径）
-athena pitfall "…" [--global]记坑（项目级 / 全局）
+athena pitfall "…" [--global]   记坑（项目级/全局）；--search "<词条>" 只读跨源搜索历史坑
 athena notify "…" [--clear]  全局广播通知（写 ~/.Athena/notices.md，各项目 context/validate 顶部可见）
 athena context               输出 AI 上下文（协议摘要+树+术语+坑）
 athena validate              自检报告（标红问题，不替你决定）
