@@ -215,6 +215,22 @@ impl Fidus {
     /// Input validation order and messages are frozen in plan P2.1; every
     /// rejection is `TypeError`/`ValueError` (host-side input faults, not
     /// engine behaviour) and nothing is clamped, transposed or padded.
+    ///
+    /// # Choosing a template that will register
+    /// The appearance gate scores the template's self-similarity on its
+    /// **luma** plane, and the alpha channel is **not** a mask there: an
+    /// `alpha == 0` transparent margin still enters as its stored RGB (often
+    /// flat black), so a mostly-transparent sprite — e.g. a Live2D window with
+    /// padded margins — can be refused as `FidusUntrackable` even when its
+    /// visible content is genuinely trackable. Crop the template to the opaque
+    /// content, or composite it over a representative background, first.
+    ///
+    /// Capture hygiene: a grab taken while the target window is *focused* may
+    /// carry compositor decorations (niri's focus ring, for instance, draws a
+    /// solid `#7fc8ff` rectangle behind the window). Those pollute the template
+    /// and can make an empty background score a false match. Register from a
+    /// decoration-free grab and self-check that the decoration colour is absent
+    /// inside the target rectangle.
     #[pyo3(signature = (img, ambiguous = false))]
     fn register_target(&mut self, img: &Bound<'_, PyAny>, ambiguous: bool) -> PyResult<()> {
         let image = parse_rgba(img)?;
@@ -230,9 +246,21 @@ impl Fidus {
     }
 
     /// Steady-state estimate under the GIL-released pattern (capture is
-    /// blocking). Returns `(x, y, confidence)` in calibrated logical
-    /// pixels; `TargetLost`/`NotCalibrated` surface as exceptions, never
-    /// as sentinel values (spec §4.5 honesty rule).
+    /// blocking). Returns `(x, y, confidence)` in calibrated logical pixels.
+    ///
+    /// There are three outcomes, and only the last raises:
+    /// * **match** — `confidence` is a *measurement* confidence bounded above
+    ///   by a per-registration ceiling (a distinctive template can still be
+    ///   capped if its appearance is self-similar); higher is stronger.
+    /// * **coasting** — a prior fix exists but this frame matched nothing:
+    ///   returns the Kalman-extrapolated track position with
+    ///   `confidence == 0.0` and does **not** raise. Treat `confidence == 0.0`
+    ///   as "no measurement this frame — discard the coordinates," never as a
+    ///   weak-but-real reading.
+    /// * **exception** — `FidusTargetLost` (never had a fix) or
+    ///   `FidusNotCalibrated`. These are genuine failures and are raised, not
+    ///   returned as sentinels (spec §4.5); `confidence == 0.0` is the single
+    ///   in-band sentinel the return does carry.
     fn estimate<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
         let mut engine = self.take_engine()?;
         let (engine, result) = py.detach(move || {
@@ -334,6 +362,10 @@ fn init_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("FidusTargetLost", m.py().get_type::<FidusTargetLost>())?;
     m.add("FidusUntrackable", m.py().get_type::<FidusUntrackable>())?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    m.add(
+        "__git_commit__",
+        option_env!("FIDUS_GIT_DESCRIBE").unwrap_or("unknown"),
+    )?;
     Ok(())
 }
 
