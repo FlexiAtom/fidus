@@ -252,6 +252,15 @@ impl Fidus {
     /// * **match** — `confidence` is a *measurement* confidence bounded above
     ///   by a per-registration ceiling (a distinctive template can still be
     ///   capped if its appearance is self-similar); higher is stronger.
+    ///   The first few matches right after the target moves — including a move
+    ///   the host itself made — are a **settle transient**, not fresh accuracy:
+    ///   the constant-velocity filter converges on the step with a brief,
+    ///   lightly overshooting response over roughly three-to-five estimates, so
+    ///   those readings trail the real position even though the on-screen target
+    ///   is already where you put it. To tell "settled" from "still converging,"
+    ///   require two adjacent matches to differ by no more than your tolerance;
+    ///   a full miss (a following `coasting`/`exception`) then re-acquisition
+    ///   instead resets the track and snaps to the new position in one step.
     /// * **coasting** — a prior fix exists but this frame matched nothing:
     ///   returns the Kalman-extrapolated track position with
     ///   `confidence == 0.0` and does **not** raise. Treat `confidence == 0.0`
@@ -272,6 +281,25 @@ impl Fidus {
         self.engine = Some(engine);
         let (x, y, c) = result.map_err(estimate_error)?;
         Ok(PyTuple::new(py, [x, y, c]).expect("three floats"))
+    }
+
+    /// Per-registration upper bound on [`Self::estimate`]'s confidence, or
+    /// `None` before a target is registered.
+    ///
+    /// A distinctive template keeps this at `1.0`; one that is self-similar
+    /// (so a match on it is inherently weaker evidence) is capped lower, down
+    /// to a floor of `0.05`. It is a **constant for the lifetime of one
+    /// `register_target`** — read it once after registering to know how far
+    /// below `1.0` every subsequent `estimate` on this target is capped — and
+    /// **not** a per-frame health signal (that is `estimate`'s own return).
+    /// This is the value that was previously only observable by watching
+    /// `estimate` plateau; exposing it lets a host distinguish "capped by a
+    /// weak appearance" from "genuinely low this frame."
+    #[getter]
+    fn confidence_ceiling(&self) -> Option<f32> {
+        self.engine
+            .as_ref()
+            .and_then(|engine| engine.confidence_ceiling())
     }
 }
 
