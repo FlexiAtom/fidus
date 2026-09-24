@@ -90,6 +90,28 @@ struct CalibData {
     independent_passes: usize,
 }
 
+/// Window-positioning engine for one caller's own render.
+///
+/// # Thread affinity: create it where you use it
+///
+/// `unsendable` on this class is a **contract**, not a conservative default:
+/// the engine holds a live capture session against the compositor, so a given
+/// instance must be constructed **and** used on one OS thread for its lifetime.
+/// The wheel deliberately ships no internal worker thread, progress reporting
+/// or cancellation — a host that wants estimates off its UI thread runs its own
+/// worker and creates the `Fidus` object *inside* it.
+///
+/// *Failure mode when this is violated*: touching an instance from another
+/// thread trips pyo3's thread guard, which surfaces as `PanicException` — a
+/// class deriving from `BaseException`, **not** from `Exception` (pyo3 0.27.2,
+/// `src/panic.rs`; the same base `SystemExit` uses, deliberately). A defensive
+/// `except Exception:` around a tick loop therefore does not catch it, and the
+/// host sees an escaped panic rather than an engine error. That is intentional:
+/// mis-threading is a bug in the caller, not a state this engine reports. Do
+/// not code against the exception's identity — it is not one of this module's
+/// exported names, and catching it means catching `BaseException`. Check
+/// `threading.get_ident()` against the thread that constructed the object
+/// instead.
 #[pyclass(unsendable, module = "fidus")]
 struct Fidus {
     /// `Option` because the blocking calls `take()` the engine into a
@@ -232,16 +254,33 @@ impl Fidus {
     /// decoration-free grab and self-check that the decoration colour is absent
     /// inside the target rectangle.
     ///
-    /// Coverage of the gate itself: self-similarity is probed only at
-    /// translation radii of 2, 4, 8 and 16 pixels, so a high
-    /// [`Self::confidence_ceiling`] means "no *fine-grained* ambiguity found",
-    /// never "this render localizes uniquely". A template that repeats more
-    /// coarsely than that window — two identical halves, a tiling with a period
-    /// above 16 px — registers with a ceiling near `1.0`; measured: 0.9759 for
-    /// a 128×64 render whose right half duplicates its left, against 0.9610 for
-    /// unstructured texture. Whether such a template is then locked to its true
-    /// position or to a shifted twin has **not** been measured, so judge a
-    /// reading by agreement between adjacent estimates, not by the ceiling.
+    /// Coverage of the gate itself: besides the four fine radii (2, 4, 8, 16 px
+    /// in every direction), **every** horizontal and vertical lag from 2 px up
+    /// to half the template's own extent is probed. A render that repeats inside
+    /// itself therefore no longer passes: a template whose right half duplicates
+    /// its left used to register at ceiling `0.9759` (measured) and is now
+    /// refused as `FidusUntrackable`; with `ambiguous = True` it registers, but
+    /// its ceiling falls to the floor `0.05`.
+    ///
+    /// What that floor buys — and what it does not. Before the sweep, the coarse
+    /// repeat was a *silent* mis-lock: on a scripted screen repeating every 32
+    /// logical px the engine sat exactly one period off in 6/6 frames, adjacent
+    /// readings agreed perfectly, and confidence equalled the 0.9461 ceiling
+    /// (all measured). **Judging a reading by agreement between consecutive
+    /// estimates therefore cannot detect this** — a stable wrong position is
+    /// indistinguishable from a settled right one that way. Compare against where
+    /// *you* placed the window. The sweep does not change the geometry of such a
+    /// mis-lock; it removes its silence (refused, or honestly floored to 0.05).
+    ///
+    /// Three limits remain, and none of them is a knob: a screen whose repetition
+    /// is *longer* than the template itself (nothing in an appearance can say the
+    /// desktop repeats); repeats along vectors that are neither horizontal nor
+    /// vertical, which are still sampled only at the fine radii; and large
+    /// renders, where a work budget drops whole axes rather than sampling them
+    /// thinly — measured, `600×400` keeps its vertical axis and `900×600` keeps
+    /// neither, falling back to the fine radii. Whether a given template fits is
+    /// computable from its size; see [`Self::confidence_ceiling`] and
+    /// `docs/spec.md` §11.1.
     #[pyo3(signature = (img, ambiguous = false))]
     fn register_target(&mut self, img: &Bound<'_, PyAny>, ambiguous: bool) -> PyResult<()> {
         let image = parse_rgba(img)?;
@@ -304,9 +343,12 @@ impl Fidus {
     /// unstructured random-texture render. A template that is self-similar —
     /// where a match is inherently weaker evidence — is capped lower, down to a
     /// floor of `0.05`. Read any value here together with the probe-coverage
-    /// note on [`Self::register_target`]: self-similarity is only checked at
-    /// translation radii up to 16 px, so a reading near the top means "no
-    /// *fine-grained* ambiguity found", not "this render localizes uniquely".
+    /// note on [`Self::register_target`]: the sweep covers every axial lag up to
+    /// half the template's extent, so a low value is a real statement about this
+    /// render — but a high one still is not a promise of uniqueness, because a
+    /// repetition *longer* than the template is a property of the desktop, and
+    /// large templates can fall back to the four fine radii under the work
+    /// budget.
     ///
     /// It is a **constant for the lifetime of one `register_target`** — read
     /// it once after registering to know how far below `1.0` every subsequent
