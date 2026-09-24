@@ -202,6 +202,14 @@ impl Default for FusedEstimator {
 }
 
 impl Estimator for FusedEstimator {
+    /// Both fused layers obey the L1 appearance ceiling, so the ceiling the
+    /// engine reports is exactly the inner `FingerprintEstimator`'s — reached
+    /// through its trait impl so the "meaningful only once registered" rule is
+    /// shared, not duplicated here.
+    fn confidence_ceiling(&self) -> Option<f32> {
+        Estimator::confidence_ceiling(&self.l1)
+    }
+
     fn register_target(
         &mut self,
         target: fidus_core::target::TargetDescription,

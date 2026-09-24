@@ -54,6 +54,21 @@ pub trait Estimator: Send {
             note: "this estimator does not accept tracking targets",
         })
     }
+
+    /// Upper bound this estimator currently applies to reported confidence,
+    /// derived from the registered target's measured appearance ambiguity
+    /// (spec §4.5).
+    ///
+    /// `None` when no target is registered or the estimator does not track.
+    /// A distinctive render ceilings at `1.0`; an opted-in ambiguous one sits
+    /// at the estimator's floor. This is a *per-registration* constant — a
+    /// caller reads it once after `register_target` to know how far below
+    /// `1.0` every `estimate` on this target is capped — never a per-frame
+    /// signal. The default declines so tracking-agnostic estimators stay
+    /// honest rather than advertising a ceiling they do not enforce.
+    fn confidence_ceiling(&self) -> Option<f32> {
+        None
+    }
 }
 
 /// Backend-level error surfaced when opening sessions or probing.
@@ -194,5 +209,14 @@ impl FidusEngine {
     /// does not support tracking.
     pub fn register_target(&mut self, target: TargetDescription) -> Result<(), EstimateError> {
         self.estimator.register_target(target)
+    }
+
+    /// The active estimator's current confidence ceiling, if any.
+    ///
+    /// Read-only mirror of [`Estimator::confidence_ceiling`]: `None` before a
+    /// target is registered, otherwise the per-registration upper bound on
+    /// `estimate`'s reported confidence.
+    pub fn confidence_ceiling(&self) -> Option<f32> {
+        self.estimator.confidence_ceiling()
     }
 }

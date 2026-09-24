@@ -181,6 +181,13 @@ impl FingerprintEstimator {
     /// Exposed so a caller that opted into
     /// [`UntrackablePolicy::TrackWithReducedConfidence`] can see how much
     /// credibility that cost.
+    ///
+    /// This is the unguarded view: before any registration it returns the
+    /// `1.0` field default, which is a placeholder rather than a bound the
+    /// estimator enforces. Through the [`Estimator`] trait the same value is
+    /// `Option`-wrapped precisely so "no ceiling yet" cannot read as
+    /// "uncapped target"; inherent methods win name resolution, so an
+    /// unqualified call here is the raw view.
     pub fn confidence_ceiling(&self) -> f32 {
         self.confidence_ceiling
     }
@@ -207,6 +214,13 @@ impl Default for FingerprintEstimator {
 }
 
 impl Estimator for FingerprintEstimator {
+    /// The stored ceiling is only meaningful once a target is registered
+    /// (the field defaults to `1.0`, which is not yet an enforced bound), so
+    /// this reports `None` before the first successful `register_target`.
+    fn confidence_ceiling(&self) -> Option<f32> {
+        self.target.is_some().then_some(self.confidence_ceiling)
+    }
+
     fn register_target(&mut self, target: TargetDescription) -> Result<(), EstimateError> {
         let pixels = u64::from(target.template_logical.width())
             .checked_mul(u64::from(target.template_logical.height()));
@@ -536,6 +550,36 @@ mod tests {
         let mut e = NullEstimator;
         let r = e.register_target(TargetDescription::new(test_template()));
         assert!(matches!(r, Err(EstimateError::NotImplementedYet { .. })));
+        assert_eq!(
+            e.confidence_ceiling(),
+            None,
+            "an estimator that does not track must not claim a ceiling it does not enforce"
+        );
+    }
+
+    #[test]
+    fn the_ceiling_is_absent_until_a_registration_succeeds() {
+        // `None` and `Some(1.0)` are different statements — "no bound has been
+        // computed" versus "this target is distinctive" — so the field's 1.0
+        // default must not leak out as an advertised bound (project
+        // convention 2: absence is not a value).
+        let mut est = FingerprintEstimator::new();
+        assert_eq!(Estimator::confidence_ceiling(&est), None);
+        assert_eq!(est.confidence_ceiling(), 1.0, "the inherent view is the raw field");
+
+        // A refused registration stores no target, so it computes no ceiling.
+        let refused = est.register_target(TargetDescription::new(gradient_template()));
+        assert!(matches!(refused, Err(EstimateError::UntrackableTarget { .. })), "{refused:?}");
+        assert_eq!(Estimator::confidence_ceiling(&est), None);
+
+        est.register_target(
+            TargetDescription::new(gradient_template()).tracking_ambiguous_appearance(),
+        )
+        .expect("explicit ambiguity opt-in");
+        assert!(
+            Estimator::confidence_ceiling(&est).is_some_and(|c| c < 0.1),
+            "an opted-in ambiguous target must expose its low ceiling"
+        );
     }
 
     /// A 60×40 horizontal gradient: unlocatable, but not for lack of

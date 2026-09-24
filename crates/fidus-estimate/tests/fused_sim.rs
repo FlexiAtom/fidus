@@ -168,6 +168,11 @@ fn ambiguous_template_ceiling_survives_fused_kalman_path() {
     let mut clock = Clock::new();
     let shared = clock.t;
     let mut est = FusedEstimator::with_clock(Box::new(move || shared));
+    assert_eq!(
+        est.confidence_ceiling(),
+        None,
+        "an estimator without a registered target must not advertise a bound"
+    );
     est.register_target(
         TargetDescription::new(gradient_template())
             .with_initial_center(LogicalPoint::new(200.0, 150.0))
@@ -178,6 +183,16 @@ fn ambiguous_template_ceiling_survives_fused_kalman_path() {
 
     let p = step(&mut est, &mut io, &mut clock).expect("gradient match");
     assert!(p.confidence <= 0.05 + f32::EPSILON, "ceiling bypassed: {}", p.confidence);
+    // The bound the API advertises must be the bound the layers applied
+    // (project convention 7): a host that reads `confidence_ceiling` to tell
+    // "capped by a weak appearance" from "genuinely low this frame" would be
+    // lied to if the fused path delegated elsewhere or reported nothing.
+    assert!(
+        est.confidence_ceiling().is_some_and(|cap| p.confidence <= cap + f32::EPSILON
+            && (cap - 0.05).abs() < 0.01),
+        "advertised ceiling does not match the applied cap: {:?}",
+        est.confidence_ceiling()
+    );
 }
 
 #[test]
