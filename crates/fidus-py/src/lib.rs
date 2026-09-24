@@ -231,6 +231,17 @@ impl Fidus {
     /// and can make an empty background score a false match. Register from a
     /// decoration-free grab and self-check that the decoration colour is absent
     /// inside the target rectangle.
+    ///
+    /// Coverage of the gate itself: self-similarity is probed only at
+    /// translation radii of 2, 4, 8 and 16 pixels, so a high
+    /// [`Self::confidence_ceiling`] means "no *fine-grained* ambiguity found",
+    /// never "this render localizes uniquely". A template that repeats more
+    /// coarsely than that window — two identical halves, a tiling with a period
+    /// above 16 px — registers with a ceiling near `1.0`; measured: 0.9759 for
+    /// a 128×64 render whose right half duplicates its left, against 0.9610 for
+    /// unstructured texture. Whether such a template is then locked to its true
+    /// position or to a shifted twin has **not** been measured, so judge a
+    /// reading by agreement between adjacent estimates, not by the ceiling.
     #[pyo3(signature = (img, ambiguous = false))]
     fn register_target(&mut self, img: &Bound<'_, PyAny>, ambiguous: bool) -> PyResult<()> {
         let image = parse_rgba(img)?;
@@ -288,11 +299,18 @@ impl Fidus {
     /// Per-registration upper bound on [`Self::estimate`]'s confidence, or
     /// `None` before a target is registered.
     ///
-    /// A distinctive template keeps this at `1.0`; one that is self-similar
-    /// (so a match on it is inherently weaker evidence) is capped lower, down
-    /// to a floor of `0.05`. It is a **constant for the lifetime of one
-    /// `register_target`** — read it once after registering to know how far
-    /// below `1.0` every subsequent `estimate` on this target is capped — and
+    /// The value is `1 − self-similarity`, so even a distinctive template
+    /// lands just **below** `1.0` rather than on it: measured `0.9610` for an
+    /// unstructured random-texture render. A template that is self-similar —
+    /// where a match is inherently weaker evidence — is capped lower, down to a
+    /// floor of `0.05`. Read any value here together with the probe-coverage
+    /// note on [`Self::register_target`]: self-similarity is only checked at
+    /// translation radii up to 16 px, so a reading near the top means "no
+    /// *fine-grained* ambiguity found", not "this render localizes uniquely".
+    ///
+    /// It is a **constant for the lifetime of one `register_target`** — read
+    /// it once after registering to know how far below `1.0` every subsequent
+    /// `estimate` on this target is capped — and
     /// **not** a per-frame health signal (that is `estimate`'s own return).
     /// This is the value that was previously only observable by watching
     /// `estimate` plateau; exposing it lets a host distinguish "capped by a
