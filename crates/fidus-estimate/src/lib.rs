@@ -128,11 +128,15 @@ pub struct FingerprintEstimator {
     last_logical: Option<LogicalPoint>,
     lost_streak: u32,
     /// Upper bound on reported confidence, set at registration from the
-    /// template's measured ambiguity. 1.0 for a distinctive render.
+    /// template's measured ambiguity: `1 − self-similarity`, floored at
+    /// [`MIN_CONFIDENCE_CEILING`]. No render reaches 1.0, because a distinctive
+    /// template still correlates a little with a shifted copy of itself
+    /// (measured 0.943 for a 60×40 hash texture).
     ///
     /// Kept as state rather than recomputed per estimate because
-    /// `localizability` is an O(n) pass over the template and the value
-    /// cannot change until the target is re-registered.
+    /// `localizability` sweeps the template's axis lags — more than a linear
+    /// pass over its pixels — and the value cannot change until the target is
+    /// re-registered.
     confidence_ceiling: f32,
     /// Extra search margin around the predicted region, in capture pixels.
     pub search_margin_px: f64,
@@ -399,6 +403,12 @@ mod tests {
     }
 
     /// A deterministic textured 60×40 logical template (NCC needs texture).
+    ///
+    /// Not as distinctive as it looks: its rows are XOR-shifts of one palette,
+    /// which makes it 0.487-self-similar at a 20 px vertical lag — invisible to
+    /// the fine probe radii, caught by the dense axis sweep. The registration
+    /// tests below therefore run against a *discounted* ceiling (0.513), which
+    /// is the honest number for this render rather than an accident of the gate.
     fn test_template() -> RgbaImage {
         let (w, h) = (60u32, 40u32);
         let mut data = Vec::with_capacity((w * h * 4) as usize);
@@ -480,7 +490,16 @@ mod tests {
         let p = est.estimate(&mut io, &frame).expect("found");
         assert!((p.position.x - 200.0).abs() < 1.5, "x = {}", p.position.x);
         assert!((p.position.y - 150.0).abs() < 1.5, "y = {}", p.position.y);
-        assert!(p.confidence > 0.6, "confidence = {}", p.confidence);
+        // What must hold is that a clean match reports *at* its ceiling, not
+        // that the ceiling is high: this fixture is 0.487 self-similar at a
+        // 20 px vertical lag (see `test_template`), so its ceiling is 0.513.
+        let ceiling = est.confidence_ceiling().expect("registered target");
+        assert!(
+            (p.confidence - ceiling).abs() < 0.01,
+            "confidence = {} does not sit at the ceiling {ceiling}",
+            p.confidence
+        );
+        assert!(p.confidence > 0.4, "confidence = {}", p.confidence);
         assert_eq!(p.source, MeasurementSource::Single("L1 Fingerprint"));
         let bbox = p.bbox_physical.expect("bbox present");
         assert!((bbox.center().x - 400.0).abs() <= 1.0);

@@ -1,18 +1,23 @@
 // Copyright 2026 Flexiatom
 // SPDX-License-Identifier: Apache-2.0
 
-//! What the registration gate's self-similarity probe does **not** cover, and
-//! what happens to a target in exactly that hole.
+//! A target whose appearance repeats on a coarse period: what the registration
+//! gate now says about it, and what the estimator does when a host overrides
+//! that verdict.
 //!
-//! `localizability()` scores a template's self-similarity at translation radii
-//! [`2, 4, 8, 16`] only (see `template.rs`), so an appearance that repeats on a
-//! coarser period is invisible to the gate: it registers, and registers with a
-//! ceiling near `1.0`. The gate's own note argues that a resulting mismatch is
-//! harmless because a jump would be rejected by the motion model — but that
-//! argument is about *small* lags. A period of tens of pixels produces a
-//! candidate of equal quality far enough away to be a different place, and the
-//! question this file answers is whether the estimator then sits on it
-//! *persistently* (a stable mis-lock) or notices, and what it reports.
+//! This file began as the measurement behind `finished/ceiling-metric-lag-window.md`:
+//! `localizability()` used to sample self-similarity at radii `[2, 4, 8, 16]`
+//! only, so an appearance repeating every 64 px registered with a ceiling of
+//! 0.946 while two candidate windows sat equally good, one period apart — a
+//! stable mis-lock reported at full credibility. The dense axis sweep
+//! (`template.rs`, `dense_axis_worst`) closed that: the same template is now
+//! refused by default, and a host that insists gets the *floor* as its ceiling
+//! rather than the near-`1.0` the old probe handed out.
+//!
+//! What has **not** changed is the position error itself: the sweep labels the
+//! ambiguity, it does not resolve it. The rows below still measure a one-period
+//! mis-lock, which is why the opt-in exists and why the label is the whole
+//! defence.
 //!
 //! No display, no compositor, no calibration mutation: a scripted screen built
 //! from repeated blocks, driven through the same `FusedEstimator` production
@@ -167,6 +172,7 @@ fn probe(
     cells: Vec<u32>,
     perturb_first: bool,
     guess_shift: f64,
+    opt_in: bool,
 ) -> Option<(f64, f32)> {
     let mut clock = Clock::new();
     let shared = clock.t;
@@ -177,12 +183,11 @@ fn probe(
     let mut est = FusedEstimator::with_clock(Box::new(move || shared));
 
     let center = LogicalPoint::new(SX + f64::from(AW) + guess_shift, SY + f64::from(AH / 2));
-    if est
-        .register_target(
-            TargetDescription::new(make_template(periodic)).with_initial_center(center),
-        )
-        .is_err()
-    {
+    let mut target = TargetDescription::new(make_template(periodic)).with_initial_center(center);
+    if opt_in {
+        target = target.tracking_ambiguous_appearance();
+    }
+    if est.register_target(target).is_err() {
         println!("{label:<38} REFUSED by the gate");
         return None;
     }
@@ -219,39 +224,48 @@ fn probe(
     (ok > 0).then_some((dx_last, conf_last))
 }
 
-/// The hole itself: an appearance repeating every 64 px passes the gate and is
-/// barely capped, even though two candidate windows are equally good.
+/// The gate's verdict on the shape this file was written about, both policies.
 #[test]
-fn coarse_period_registers_with_a_high_ceiling() {
+fn a_coarse_period_is_refused_by_default_and_floored_when_overridden() {
     let shared = Clock::new().t;
     let mut est = FusedEstimator::with_clock(Box::new(move || shared));
-    est.register_target(TargetDescription::new(make_template(true)))
-        .expect("[A|A] must clear the gate: its period is outside the probe window");
-    let ceiling = est.confidence_ceiling().expect("registered");
+    let err = est
+        .register_target(TargetDescription::new(make_template(true)))
+        .expect_err("[A|A] repeats at 64 px, inside its own 64 px extent: the sweep must see it");
+    println!("default policy: {err}");
+
+    let mut opted = FusedEstimator::with_clock(Box::new(move || shared));
+    opted
+        .register_target(
+            TargetDescription::new(make_template(true)).tracking_ambiguous_appearance(),
+        )
+        .expect("an explicit opt-in must still produce a track");
+    let ceiling = opted.confidence_ceiling().expect("registered");
+
     let mut control = FusedEstimator::with_clock(Box::new(move || shared));
     control
         .register_target(TargetDescription::new(make_template(false)))
         .expect("[A|B] must clear the gate");
     let ceiling_control = control.confidence_ceiling().expect("registered");
-    println!("ceiling: periodic [A|A] = {ceiling}, aperiodic [A|B] = {ceiling_control}");
-    assert!(
-        ceiling > 0.9,
-        "a 64 px period must be invisible to a probe that stops at 16 px, got {ceiling}"
-    );
+
+    println!("ceiling: opted-in [A|A] = {ceiling}, aperiodic [A|B] = {ceiling_control}");
+    // 0.946 is what this template used to be allowed to claim, because the
+    // probe stopped at 16 px. Anything near that is the hole reopening.
+    assert!(ceiling <= 0.06, "a fully ambiguous repeat must sit at the floor, got {ceiling}");
+    assert!(ceiling_control > 0.9, "the aperiodic control must stay undiscounted: {ceiling_control}");
 }
 
 /// The scenario the finding is about: an identical region sits **one period
 /// away** from the target, so the NCC surface has two peaks of exactly equal
 /// score and nothing in the appearance separates them.
 ///
-/// Screen is `[A, A, A]`. The target's window spans copies 1+2 (`truth`); the
-/// decoy window spans copies 0+1, one period to its left. The belief is varied
-/// across the two cases, including the case where the host's belief *is* the
-/// truth.
+/// Reached through the opt-in, which is the only way this shape can be tracked
+/// at all now. The mis-lock is still a mis-lock — the sweep labels ambiguity,
+/// it does not resolve it — but it is no longer silent: the reading sits at the
+/// discounted ceiling instead of at the 0.95 the old probe handed out.
 ///
-/// This pins what the engine does today, not what it ought to do: it is the
-/// measurement behind `pool/ceiling-metric-lag-window.md`. Changing how an
-/// equal-peak tie breaks must change these expectations on purpose.
+/// This pins what the engine does today, not what it ought to do. Changing how
+/// an equal-peak tie breaks must change these expectations on purpose.
 #[test]
 fn an_equal_peak_one_period_away_is_broken_by_search_order_not_evidence() {
     let truth = SX + f64::from(2 * AW); // centre of the window over copies 1+2
@@ -270,9 +284,10 @@ fn an_equal_peak_one_period_away_is_broken_by_search_order_not_evidence() {
         let mut est = FusedEstimator::with_clock(Box::new(move || shared));
         est.register_target(
             TargetDescription::new(make_template(true))
-                .with_initial_center(LogicalPoint::new(belief, SY + f64::from(AH / 2))),
+                .with_initial_center(LogicalPoint::new(belief, SY + f64::from(AH / 2)))
+                .tracking_ambiguous_appearance(),
         )
-        .expect("[A|A] must clear the gate");
+        .expect("[A|A] must track once the host insists");
         let ceiling = est.confidence_ceiling().expect("registered");
 
         let mut errs = Vec::new();
@@ -296,50 +311,56 @@ fn an_equal_peak_one_period_away_is_broken_by_search_order_not_evidence() {
         );
 
         // Measured, both rows: every frame reports the decoy, one full period
-        // left of the truth, at the ceiling.
+        // left of the truth. The position is still wrong.
         assert!(
             errs.iter().all(|d| (d + f64::from(AW)).abs() < 2.0),
             "{name}: expected a stable lock one period ({AW} px) left of the truth, got [{e}]"
         );
+        // …and every frame says so, at a ceiling the sweep computed from the
+        // template's own repetition rather than from the fine radii.
+        assert!(
+            ceiling <= 0.06,
+            "{name}: the opt-in must inherit the discount, got ceiling {ceiling}"
+        );
         assert!(
             confs.iter().all(|c| (c - ceiling).abs() < 1e-3),
-            "{name}: the mislock must be reported at the full ceiling, i.e. silently: {confs:?}"
+            "{name}: the mislock must be reported at the ceiling, not above it: {confs:?}"
         );
     }
 }
 
 #[test]
 fn equal_peaks_one_period_apart_report_which_one_won() {
-    println!("period = {AW} logical px; probe radii = [2,4,8,16]; twin spacing = {AW} px");
+    println!("period = {AW} logical px; dense axis sweep covers lags 2..=64; twin spacing = {AW} px");
     let periodic = vec![0, 0, 0];
     let aperiodic = vec![0, 1];
-    let tie = probe(
-        "R1 periodic, guess correct",
-        true,
-        periodic.clone(),
-        false,
-        0.0,
-    );
+    // The default policy first, as its own row: nothing below this shape can
+    // reach a matcher unless the host asked for it.
+    let refused = probe("R0 periodic, default policy", true, periodic.clone(), false, 0.0, false);
+    let tie = probe("R1 periodic, opt-in, guess correct", true, periodic.clone(), false, 0.0, true);
     let twin_better = probe(
-        "R2 periodic, copy0 perturbed",
+        "R2 periodic, opt-in, copy0 perturbed",
         true,
         periodic.clone(),
         true,
         0.0,
+        true,
     );
     let guess_twin = probe(
-        "R3 periodic, guess one period off",
+        "R3 periodic, opt-in, guess one period off",
         true,
         periodic.clone(),
         false,
         f64::from(AW),
+        true,
     );
     let guess_twin_twin_better = probe(
-        "R4 periodic, guess off + copy0 bad",
+        "R4 periodic, opt-in, guess off + copy0 bad",
         true,
         periodic,
         true,
         f64::from(AW),
+        true,
     );
     let unique = probe(
         "R5 control [A|B], guess correct",
@@ -347,6 +368,7 @@ fn equal_peaks_one_period_apart_report_which_one_won() {
         aperiodic.clone(),
         false,
         0.0,
+        false,
     );
     probe(
         "R6 control [A|B], guess 24 off",
@@ -354,8 +376,10 @@ fn equal_peaks_one_period_apart_report_which_one_won() {
         aperiodic,
         false,
         24.0,
+        false,
     );
 
+    assert!(refused.is_none(), "R0: the gate must refuse, not report a position");
     // R2 is the decisive row: window 0 is now *strictly worse* than window 1, so
     // a score-driven chooser must move and a belief-driven one must not.
     let (dx2, conf2) = twin_better.expect("R2 must match");

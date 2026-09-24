@@ -51,12 +51,18 @@ const MAX_SEARCH_POSITIONS: u64 = 16_000_000;
 const COARSE_STEP: u32 = 3;
 
 /// Shift radii (capture pixels) at which template self-similarity is probed
-/// by [`localizability`].
+/// along the **diagonals**, and the two points the decay rule compares.
 ///
 /// The smallest radius must exceed the subpixel refinement range (±1 px)
 /// so that "the peak is one pixel wide" is not mistaken for ambiguity; the
 /// largest is the scale over which a tracking loop must stay locked between
 /// frames.
+///
+/// Along the two axes these four samples are not the coverage any more: every
+/// lag from `SELF_SIMILARITY_RADII[0]` to half the template's own extent is
+/// probed densely, see [`dense_axis_worst`]. They survive here because the
+/// diagonal probe and the near/far pair of the decay rule are what they were
+/// always measuring, and both are unchanged.
 const SELF_SIMILARITY_RADII: [i64; 4] = [2, 4, 8, 16];
 
 /// Self-similarity above which a template is refused outright: at this level
@@ -68,6 +74,23 @@ const SELF_SIMILARITY_RADII: [i64; 4] = [2, 4, 8, 16];
 /// its axis) and comfortably above the worst legitimate template measured
 /// (a solid block with a thin border: 0.822 at r=2, decaying to 0.648).
 const MAX_SELF_SIMILARITY: f64 = 0.98;
+
+/// First lag of the dense axis sweep: the smallest fine radius, which is
+/// already outside the subpixel refinement range and already probed along the
+/// axes — so the sweep starts here and skips the fine radii it would repeat.
+const DENSE_LAG_MIN: i64 = SELF_SIMILARITY_RADII[0];
+
+/// Work cap for the dense axis sweep, in pixel products **across both axes**.
+///
+/// The sweep is `O(W·H·(W + H))` and the caller registers synchronously, so
+/// coverage has to give way to a bound at some size. Measured on this machine
+/// in release: the sweep costs ~1.5 ns per product, so the cap is ~90 ms —
+/// `400×300` (30 M products) costs 45 ms, `200×200` (5.6 M) costs 8.7 ms,
+/// `600×400` keeps only its cheaper axis, `900×600` (119 M for the cheaper
+/// axis alone) keeps neither. Above the cap the metric falls back to the fine
+/// radii — today's coverage, a boundary the caller can compute from its own
+/// template size — and never silently degrades *within* the bound.
+const MAX_DENSE_LAG_WORK: u64 = 60_000_000;
 
 /// Minimum decay of self-similarity from the smallest probe radius to the
 /// largest before a template counts as genuinely localizable.
@@ -81,7 +104,7 @@ const MAX_SELF_SIMILARITY: f64 = 0.98;
 /// | template | std | r=2 | r=4 | r=8 | r=16 | verdict |
 /// |---|---|---|---|---|---|---|
 /// | linear gradient | 73.6 | 1.000 | 1.000 | 1.000 | 1.000 | unlocatable |
-/// | grating (fx=1, fy=2) | 60.0 | 0.980 | 0.924 | 0.738 | 0.195 | periodic, decays → usable |
+/// | grating (fx=1, fy=2) | 60.0 | 0.980 | 0.924 | 0.738 | 0.195 | refused by the dense sweep |
 /// | solid block + thin border | 97.5 | 0.822 | 0.711 | 0.692 | 0.648 | weak but locatable |
 /// | hash texture | 74.8 | 0.016 | 0.009 | 0.025 | 0.017 | excellent |
 ///
@@ -95,6 +118,15 @@ const MAX_SELF_SIMILARITY: f64 = 0.98;
 /// The block's 0.822 → 0.648 plateau passes because the decay requirement
 /// only applies above `near > 0.9`: its absolute level is already far enough
 /// from 1.0 that its peak is unambiguous.
+///
+/// The grating row is the cautionary tale about the probe radii themselves.
+/// It decays beautifully from 0.980 to 0.195, and that decay is *real* — but
+/// it says nothing about the 20 px period the pattern actually repeats on,
+/// because no probe lands there. Two windows one period apart score equally,
+/// so the reading is arbitrary and silently so. `MAX_DENSE_LAG_WORK`'s sweep
+/// is what catches it (measured `1.0000` at a 20 px vertical lag); a grating
+/// with only **one** period per axis still decorrelates and stays usable
+/// (measured `0.9795`, accepted).
 const MIN_SELF_SIMILARITY_DECAY: f64 = 0.1;
 
 /// Coarse candidates carried into the full-resolution refinement.
@@ -182,6 +214,204 @@ fn block_mean_template(t: &RgbaImage, x0: u32, y0: u32, step: u32) -> f32 {
     if n == 0.0 { 0.0 } else { sum / n }
 }
 
+/// The template's luma as a tightly-packed plane, same weights as
+/// [`luma_plane`] (which takes a frame).
+///
+/// The dense sweep touches every pixel once per lag, so the alternative —
+/// calling [`RgbaImage::luma_at`] in the inner loop — would redo the Rec.709
+/// multiply for the same value once per lag.
+fn template_luma_plane(template: &RgbaImage) -> Vec<f32> {
+    let (w, h) = (template.width() as usize, template.height() as usize);
+    let Some(len) = w.checked_mul(h) else {
+        return Vec::new();
+    };
+    let mut plane = Vec::with_capacity(len);
+    for y in 0..h as u32 {
+        for x in 0..w as u32 {
+            plane.push(template.luma_at(x, y));
+        }
+    }
+    plane
+}
+
+/// Column (or row) luma moments of the template, as prefix sums along the
+/// axis a shift moves along.
+///
+/// `pre1[i + 1]` is the luma total over columns `0..=i` (rows `0..h`), `pre2`
+/// the same for squared luma. Every overlap window of an axis shift is then a
+/// difference of two prefix values, so the mean and the squared deviation sums
+/// cost `O(1)` per lag and the sweep's only per-lag work is the cross term.
+fn axis_moments(plane: &[f32], w: usize, h: usize, along_x: bool) -> (Vec<f64>, Vec<f64>) {
+    let (n, m) = if along_x { (w, h) } else { (h, w) };
+    let mut pre1 = vec![0.0f64; n + 1];
+    let mut pre2 = vec![0.0f64; n + 1];
+    for i in 0..n {
+        let (mut sum, mut sq) = (0.0f64, 0.0f64);
+        for j in 0..m {
+            let v = plane[if along_x { j * w + i } else { i * w + j }] as f64;
+            sum += v;
+            sq += v * v;
+        }
+        pre1[i + 1] = pre1[i] + sum;
+        pre2[i + 1] = pre2[i] + sq;
+    }
+    (pre1, pre2)
+}
+
+/// `Σ a·b` over the overlap of a shift by `lag` along one axis.
+fn cross_term(plane: &[f32], w: usize, h: usize, lag: usize, along_x: bool) -> f64 {
+    let mut acc = 0.0f64;
+    if along_x {
+        for row in plane.chunks(w) {
+            for x in 0..w - lag {
+                acc += row[x] as f64 * row[x + lag] as f64;
+            }
+        }
+    } else {
+        // The overlap is two contiguous blocks of rows: `0..(h - lag)` against
+        // `lag..h`, so the walk is sequential in memory either way.
+        let len = (h - lag) * w;
+        let offset = lag * w;
+        for i in 0..len {
+            acc += plane[i] as f64 * plane[i + offset] as f64;
+        }
+    }
+    acc
+}
+
+/// NCC of the template against itself shifted by `lag` along one axis,
+/// computed from precomputed moments.
+///
+/// The two refusals are the same as [`self_ncc`]'s: a window thinner than 4
+/// samples on either axis, and a window whose variance is at quantization
+/// level (dividing by that manufactures a score out of nothing). Both are
+/// checked *before* the cross term, which is the expensive part.
+fn axis_ncc(
+    plane: &[f32],
+    w: usize,
+    h: usize,
+    lag: usize,
+    along_x: bool,
+    moments: &(Vec<f64>, Vec<f64>),
+) -> Option<f64> {
+    let (n, m) = if along_x { (w, h) } else { (h, w) };
+    if n - lag < 4 || m < 4 {
+        return None;
+    }
+    let count = ((n - lag) * m) as f64;
+    let (pre1, pre2) = moments;
+    // Window A is the shifted-away source `0..(n - lag)`, window B the target
+    // `lag..n`; a prefix difference gives each window's moments in O(1).
+    let (sa, sb) = (pre1[n - lag], pre1[n] - pre1[lag]);
+    let (saa, sbb) = (pre2[n - lag], pre2[n] - pre2[lag]);
+    let (ma, mb) = (sa / count, sb / count);
+    let (da, db) = (saa - count * ma * ma, sbb - count * mb * mb);
+    if da < MIN_VARIANCE_PER_SAMPLE * count || db < MIN_VARIANCE_PER_SAMPLE * count {
+        return None;
+    }
+    let num = cross_term(plane, w, h, lag, along_x) - count * ma * mb;
+    Some(num / (da.sqrt() * db.sqrt()))
+}
+
+/// Pixel products the dense sweep would spend sweeping one axis of length `n`
+/// and depth `m`, or `None` when that axis has no lags left to sweep.
+///
+/// The lags the fine pass already scored are excluded from the price and from
+/// the sweep: paying twice for the same lag would inflate the budget's notion
+/// of a template's size.
+fn axis_lag_work(n: usize, m: usize) -> Option<u64> {
+    let floor = DENSE_LAG_MIN as usize;
+    let cap = n / 2;
+    if cap < floor {
+        return None;
+    }
+    let total: u64 = (floor..=cap)
+        .filter(|l| !SELF_SIMILARITY_RADII.iter().any(|r| *r as usize == *l))
+        .map(|l| ((n - l) * m) as u64)
+        .sum();
+    Some(total)
+}
+
+/// Which axes the dense sweep can afford — cheapest first — and the last lag
+/// of each.
+///
+/// The budget is on the *total* across both axes, because the total is what the
+/// caller pays. Pricing the axes apart means an unaffordable axis is dropped
+/// without taking the affordable one down with it.
+fn plan_dense_axes(w: usize, h: usize) -> Vec<(bool, usize)> {
+    let mut priced: Vec<(u64, bool, usize)> = Vec::new();
+    for along_x in [true, false] {
+        let (n, m) = if along_x { (w, h) } else { (h, w) };
+        if let Some(work) = axis_lag_work(n, m) {
+            priced.push((work, along_x, n / 2));
+        }
+    }
+    priced.sort_unstable_by_key(|(work, _, _)| *work);
+    let mut spent = 0u64;
+    let mut plan = Vec::with_capacity(priced.len());
+    for (work, along_x, cap) in priced {
+        match spent.checked_add(work) {
+            Some(total) if total <= MAX_DENSE_LAG_WORK => {
+                spent = total;
+                plan.push((along_x, cap));
+            }
+            // Out of budget (or out of range): the list is sorted ascending, so
+            // no later axis fits either.
+            _ => break,
+        }
+    }
+    plan
+}
+
+/// Worst self-similarity over **every** axis lag the template can testify to.
+///
+/// # Scope, which is a boundary rather than a knob
+///
+/// A mis-lock displaces the reported position by the screen's own repetition
+/// period `P`. If `P` fits inside the template, the template is self-similar
+/// at `P` and registration can see it — that is exactly the case this sweep
+/// closes, and it is swept *densely*, so unlike a radius list it has no gap
+/// for a period to hide in. If `P` exceeds the template, the template holds
+/// one copy of the content and nothing about the appearance says the screen
+/// repeats: that ambiguity is a property of the desktop, and no template-side
+/// metric can measure it. Half the extent is where the first case ends — past
+/// it the overlap is a sliver that manufactures scores (see
+/// [`localizability`]'s boundaries) — and repeat vectors that are neither
+/// horizontal nor vertical are still sampled only at the fine radii, because
+/// the full 2-D lag space costs 22 s for a 200×200 template, measured.
+///
+/// Returns `None` when the template is too large to sweep within budget, or
+/// when no lag had a usable overlap, and stops at the first lag at or above
+/// [`MAX_SELF_SIMILARITY`]: the verdict is already "refuse", and finishing the
+/// sweep would only cost the caller.
+fn dense_axis_worst(template: &RgbaImage) -> Option<f64> {
+    let (w, h) = (template.width() as usize, template.height() as usize);
+    // Price the sweep before copying the template: the plane is a megabyte per
+    // megapixel, and paying for it only to find the sweep unaffordable would
+    // make the budget itself expensive.
+    let plan = plan_dense_axes(w, h);
+    if plan.is_empty() {
+        return None;
+    }
+    let plane = template_luma_plane(template);
+    let mut worst: Option<f64> = None;
+    for (along_x, cap) in plan {
+        let moments = axis_moments(&plane, w, h, along_x);
+        for lag in (DENSE_LAG_MIN as usize)..=cap {
+            if SELF_SIMILARITY_RADII.iter().any(|r| *r as usize == lag) {
+                continue; // the fine pass already scored this lag
+            }
+            if let Some(s) = axis_ncc(&plane, w, h, lag, along_x, &moments) {
+                if s >= MAX_SELF_SIMILARITY {
+                    return Some(s);
+                }
+                worst = Some(worst.map_or(s, |prev| prev.max(s)));
+            }
+        }
+    }
+    worst
+}
+
 /// Why a template cannot be tracked, as reported by [`localizability`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Unlocatable {
@@ -217,10 +447,11 @@ impl core::fmt::Display for Unlocatable {
 
 /// Whether `template` can be located at all, and how distinctly.
 ///
-/// Returns the **worst** (highest) self-similarity across
-/// `SELF_SIMILARITY_RADII` on success: 0 means every shifted copy is
-/// uncorrelated (ideal), values approaching 1 mean the match position is
-/// increasingly arbitrary.
+/// Returns the **worst** (highest) self-similarity the probe can see: over
+/// `SELF_SIMILARITY_RADII` in every direction, plus *every* horizontal and
+/// vertical lag up to half the template's extent (`dense_axis_worst`). 0 means
+/// every shifted copy is uncorrelated (ideal), values approaching 1 mean
+/// the match position is increasingly arbitrary.
 ///
 /// # Why this is checked at registration and not only at match time
 ///
@@ -234,16 +465,37 @@ impl core::fmt::Display for Unlocatable {
 /// error return the caller can act on (project convention 4: degenerate input
 /// is refused, not smoothed over).
 ///
-/// # Failure mode of this check
+/// # What this check cannot see
 ///
-/// It samples a fixed set of radii, so a pattern that repeats with a period
-/// landing exactly between them (e.g. self-similar at 6 px but not at 4 or 8)
-/// can slip through. That is contained rather than fatal: such a template
-/// still produces a *correct* peak at its true position — the ambiguity is
-/// between equally-good candidates at a fixed offset, and the L7 fusion's
-/// motion model rejects the resulting jumps as inconsistent with the track.
-/// The cases this must catch — gradients and near-uniform fills, which are
-/// ambiguous at *every* radius — cannot slip through any radius choice.
+/// Four boundaries, each a limit of what a *template-side* metric can testify
+/// to rather than a threshold that could be tuned away:
+///
+/// 1. **A screen period longer than the template itself.** A mis-lock
+///    displaces the position by the *screen's* repetition period `P`. If `P`
+///    fits inside the template, the template is self-similar at `P` and this
+///    sweep sees it — which is why the axis lags are swept densely, leaving no
+///    gap for a period to hide in. If `P` exceeds the template, the template
+///    holds one copy of the content and nothing about the appearance says the
+///    desktop repeats: that ambiguity is a property of the desktop, and no
+///    template-side measurement can bound it.
+/// 2. **Repeats along vectors that are neither horizontal nor vertical.**
+///    Those are sampled only at the fine radii, because a dense sweep of the
+///    full 2-D lag space costs 22 s for a 200×200 template (measured). A
+///    diagonal-only repeat with a period above 16 px can therefore still pass.
+///    Unlike the axis case, no measurement of the resulting behaviour exists —
+///    for axes the stable mis-lock *was* measured (equal peaks, full
+///    confidence), so this is an open boundary, not a mitigated one.
+/// 3. **Lags beyond half the extent.** The overlap there is a sliver: measured
+///    on a real 160×160 crop, the score at a 154 px vertical lag reached
+///    1.0000 on a 6 px overlap — which would refuse a legitimate target. The
+///    cap is where a template can no longer be asked about its own period.
+/// 4. **Lags the work budget had to give up.** Above `MAX_DENSE_LAG_WORK` the
+///    sweep is skipped axis by axis, cheapest first, so a large render can
+///    register on *partial* coverage: measured, `600×400` keeps its vertical
+///    axis and `900×600` keeps neither, falling back to the fine radii. A host
+///    can compute whether its own template fits from the size — which is why
+///    every host-facing description of the ceiling has to say what it is *not*
+///    a promise about.
 pub fn localizability(template: &RgbaImage) -> Result<f64, Unlocatable> {
     let (w, h) = (template.width() as i64, template.height() as i64);
     let min_radius = SELF_SIMILARITY_RADII[0];
@@ -276,7 +528,7 @@ pub fn localizability(template: &RgbaImage) -> Result<f64, Unlocatable> {
         return Err(Unlocatable::TooSmall);
     }
 
-    let worst = by_radius.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let mut worst = by_radius.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     if worst >= MAX_SELF_SIMILARITY {
         return Err(Unlocatable::SelfSimilar { worst });
     }
@@ -284,10 +536,22 @@ pub fn localizability(template: &RgbaImage) -> Result<f64, Unlocatable> {
     // pattern that decorrelates over distance is trackable, a
     // translation-invariant one is not. Templates whose similarity is
     // already low everywhere skip this (see MIN_SELF_SIMILARITY_DECAY).
+    // Deliberately still decided by the fine radii alone: the question is
+    // "does similarity fall off with distance", and a sweep capped at half the
+    // extent cannot answer it — the far end is the cap, not a decorrelated lag.
     let near = by_radius[0];
     let far = *by_radius.last().expect("non-empty");
     if near > 0.9 && near - far < MIN_SELF_SIMILARITY_DECAY {
         return Err(Unlocatable::SelfSimilar { worst: near });
+    }
+    // The coarse pass runs only after the fine pass has failed to decide, so
+    // the shapes this check exists for — gradients and near-uniform fills,
+    // ambiguous at 2 px already — cost no more than they used to.
+    if let Some(dense) = dense_axis_worst(template) {
+        worst = worst.max(dense);
+        if worst >= MAX_SELF_SIMILARITY {
+            return Err(Unlocatable::SelfSimilar { worst });
+        }
     }
     Ok(worst.clamp(0.0, 1.0))
 }
@@ -776,19 +1040,22 @@ mod tests {
         let s = localizability(&hash).expect("hash texture must be trackable");
         assert!(s < 0.1, "hash texture self-similarity {s}, expected ~0.025");
 
-        // A grating is *periodic* — highly self-similar at 2 px (~0.98) —
-        // but it decorrelates with distance (~0.19 at 16 px), so its peak is
-        // real and it must NOT be refused. This is the case a naive
-        // "self-similarity > threshold" test would wrongly kill; it is also
-        // the pattern `fused_sim` tracks end-to-end.
+        // A grating with **one** period across each axis is smooth (self-
+        // similarity 0.98 at 2 px) yet no repeat of it fits inside the template,
+        // so its peak is unambiguous and it must not be refused. This is the
+        // case a naive "self-similarity > threshold" test would wrongly kill.
+        // Measured: 0.9795 worst, coming from the 2 px lag itself — the sweep
+        // adds nothing here, which is the point.
         let grating = tpl_from(|x, y| {
-            let v = 127.0
+            (127.0
                 + 120.0
                     * (2.0 * std::f64::consts::PI * x as f64 / 60.0).sin()
-                    * (2.0 * 2.0 * std::f64::consts::PI * y as f64 / 40.0).sin();
-            v.clamp(0.0, 255.0) as u8
+                    * (2.0 * std::f64::consts::PI * y as f64 / 40.0).sin())
+            .clamp(0.0, 255.0) as u8
         });
-        assert!(localizability(&grating).is_ok(), "grating refused: {:?}", localizability(&grating));
+        let s = localizability(&grating).expect("single-period grating must be trackable");
+        assert!(s > 0.9, "single-period grating should look ambiguous at small lags: {s}");
+        assert!(s < MAX_SELF_SIMILARITY, "single-period grating refused: {s}");
 
         // Weak texture, but locatable: a solid fill with a thin border. Its
         // self-similarity plateaus around 0.65 — high, yet far enough from
@@ -801,6 +1068,190 @@ mod tests {
             "bordered block refused: {:?}",
             localizability(&bordered)
         );
+    }
+
+    /// The sweep computes its scores from prefix sums, so it must be shown to
+    /// produce *the same numbers* as the two-pass reference rather than
+    /// approximations of them: a summation-order artefact here would move the
+    /// accept/refuse line silently. Measured worst deviation over these fixtures
+    /// and every swept lag: 5.9e-14, against a 1e-9 bound.
+    #[test]
+    fn dense_sweep_reproduces_the_two_pass_reference() {
+        let fixtures = [
+            tpl_from(hash_luma),
+            tpl_from(|x, y| {
+                if (2..57).contains(&x) && (2..37).contains(&y) {
+                    250
+                } else {
+                    20
+                }
+            }),
+            tiled(&tpl_from(hash_luma), 2),
+        ];
+        for t in fixtures {
+            let (w, h) = (t.width() as usize, t.height() as usize);
+            let plane = template_luma_plane(&t);
+            for along_x in [true, false] {
+                let n = if along_x { w } else { h };
+                let moments = axis_moments(&plane, w, h, along_x);
+                for lag in (DENSE_LAG_MIN as usize)..=(n / 2) {
+                    let swept = axis_ncc(&plane, w, h, lag, along_x, &moments);
+                    let reference = if along_x {
+                        self_ncc(&t, lag as i64, 0)
+                    } else {
+                        self_ncc(&t, 0, lag as i64)
+                    };
+                    assert_eq!(
+                        swept.is_some(),
+                        reference.is_some(),
+                        "lag {lag} along_x={along_x}: one side refused the overlap and the other did not"
+                    );
+                    if let (Some(a), Some(b)) = (swept, reference) {
+                        assert!(
+                            (a - b).abs() < 1e-9,
+                            "lag {lag} along_x={along_x}: prefix {a} vs two-pass {b}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Highest self-similarity over the fine radii alone — the coverage the
+    /// gate had before the dense sweep existed.
+    fn fine_radius_worst(template: &RgbaImage) -> f64 {
+        let mut worst = f64::NEG_INFINITY;
+        for r in SELF_SIMILARITY_RADII {
+            for (dx, dy) in [(r, 0), (0, r), (r, r), (r, -r)] {
+                if let Some(s) = self_ncc(template, dx, dy) {
+                    worst = worst.max(s);
+                }
+            }
+        }
+        worst
+    }
+
+    /// A template tiled `copies` times along x: repetition with a period the
+    /// fine radii cannot reach.
+    fn tiled(base: &RgbaImage, copies: u32) -> RgbaImage {
+        let (w, h) = (base.width(), base.height());
+        let mut data = Vec::with_capacity((w * copies * h * 4) as usize);
+        for y in 0..h {
+            for _ in 0..copies {
+                for x in 0..w {
+                    data.extend_from_slice(&base.rgba(x, y));
+                }
+            }
+        }
+        RgbaImage::from_raw(w * copies, h, data)
+    }
+
+    /// The hole this sweep exists to close: a template that repeats at a period
+    /// beyond the fine radii used to score as *distinctive*.
+    #[test]
+    fn repetition_beyond_the_fine_radii_is_caught() {
+        // `[A|A]` of a hash texture: self-similar at 60 px, which no radius in
+        // [2,4,8,16] can reach. The fine pass scores it 0.016 — better than an
+        // ordinary texture, because ordinary textures are not *quite* this
+        // uncorrelated. Measured.
+        let halves = tiled(&tpl_from(hash_luma), 2);
+        let fine = fine_radius_worst(&halves);
+        assert!(fine < 0.1, "the fine pass should have been blind here, got {fine}");
+        assert!(
+            matches!(localizability(&halves), Err(Unlocatable::SelfSimilar { worst }) if worst > 0.99),
+            "two identical halves were accepted: {:?}",
+            localizability(&halves)
+        );
+
+        // A grating with *two* periods vertically inside a 40 px template: the
+        // same shape, in the other axis. This is the case spec §11.1 used to
+        // call "periodic but decaying, usable" — that verdict came from
+        // sampling only up to 16 px, below the 20 px period, and the dense
+        // sweep falsifies it: the template is identical to itself at lag 20.
+        let two_period = tpl_from(|x, y| {
+            (127.0
+                + 120.0
+                    * (2.0 * std::f64::consts::PI * x as f64 / 60.0).sin()
+                    * (2.0 * 2.0 * std::f64::consts::PI * y as f64 / 40.0).sin())
+            .clamp(0.0, 255.0) as u8
+        });
+        assert!(
+            localizability(&two_period).is_err(),
+            "exactly 2-periodic grating accepted: {:?}",
+            localizability(&two_period)
+        );
+    }
+
+    /// Not every coarse repeat is a refusal: an ambiguity that is real but
+    /// partial must *discount* the ceiling instead, so there is no cliff at the
+    /// accept/refuse boundary.
+    #[test]
+    fn partial_coarse_repetition_discounts_without_refusing() {
+        // An RGB texture that looks like noise and is not: rows are XOR-shifts
+        // of one palette, which makes them correlate at a 20 px vertical lag.
+        // Fine pass: 0.117. Dense pass: 0.487. Both accept; the ceiling drops
+        // from 0.88 to 0.51, which is the honest number for this render.
+        let mut data = Vec::with_capacity(60 * 40 * 4);
+        for y in 0..40u32 {
+            for x in 0..60u32 {
+                let v = (((x * 7) ^ (y * 13)) % 251) as u8;
+                let g = ((v as u16 * 3) % 251) as u8;
+                data.extend_from_slice(&[v, g, 250 - v, 255]);
+            }
+        }
+        let looks_like_noise = RgbaImage::from_raw(60, 40, data);
+        let fine = fine_radius_worst(&looks_like_noise);
+        let reported = localizability(&looks_like_noise).expect("must stay trackable");
+        assert!(fine < 0.2, "expected the fine pass to understate this: {fine}");
+        assert!(reported > fine + 0.3, "coarse repeat did not raise the verdict: {reported}");
+    }
+
+    /// A stricter gate may refuse more, and must never *understate* ambiguity:
+    /// the sweep maximises over a superset of the fine lags, so the reported
+    /// value can only rise. That monotonicity is why the refusals measured
+    /// before it existed (a gradient, a whole window with transparent margins)
+    /// stay refused without re-running them.
+    #[test]
+    fn the_coarse_pass_can_only_discount_never_rescue() {
+        let fixtures = [
+            tpl_from(hash_luma),
+            tpl_from(|x, y| ((x * 255) / 60).clamp(0, 255) as u8 ^ ((y * 7) % 3) as u8),
+            tiled(&tpl_from(hash_luma), 2),
+            tpl_from(|x, y| if (2..57).contains(&x) && (2..37).contains(&y) { 250 } else { 20 }),
+        ];
+        for t in fixtures {
+            let floor = fine_radius_worst(&t).min(1.0);
+            match localizability(&t) {
+                Ok(s) => assert!(
+                    s + 1e-9 >= floor,
+                    "gate got looser than the fine radii alone: {s} < {floor}"
+                ),
+                Err(Unlocatable::SelfSimilar { worst }) => assert!(
+                    worst + 1e-9 >= floor,
+                    "gate got looser than the fine radii alone: {worst} < {floor}"
+                ),
+                // Flat or too small to probe: refused outright, which no
+                // ordering claim applies to.
+                Err(_) => {}
+            }
+        }
+    }
+
+    /// The budget drops whole axes, cheapest first, rather than sampling a
+    /// large template thinly: coverage is either there or named as absent.
+    /// Boundary values measured as pixel products from `axis_lag_work`.
+    #[test]
+    fn the_budget_gives_up_axes_not_resolution() {
+        // 5.6 M products across both axes: fully covered.
+        assert_eq!(plan_dense_axes(200, 200).len(), 2);
+        // 30 M: still both, and comfortably inside the cap.
+        assert_eq!(plan_dense_axes(400, 300).len(), 2);
+        // 34.8 M for the cheaper (vertical) axis, 52.8 M for the other: the sum
+        // is over the cap, so only the axis that fits is swept.
+        assert_eq!(plan_dense_axes(600, 400), vec![(false, 200)]);
+        // 119 M for the cheaper axis alone: nothing is swept, and the verdict
+        // falls back to the fine radii — a boundary a caller can compute.
+        assert!(plan_dense_axes(900, 600).is_empty());
     }
 
     #[test]
