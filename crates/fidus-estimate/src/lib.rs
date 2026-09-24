@@ -175,20 +175,15 @@ impl FingerprintEstimator {
         }
     }
 
-    /// Upper bound currently applied to reported confidence, from the
-    /// registered template's measured ambiguity (1.0 when distinctive).
+    /// The clamp value itself, including the `1.0` placeholder that stands in
+    /// that field before any registration.
     ///
-    /// Exposed so a caller that opted into
-    /// [`UntrackablePolicy::TrackWithReducedConfidence`] can see how much
-    /// credibility that cost.
-    ///
-    /// This is the unguarded view: before any registration it returns the
-    /// `1.0` field default, which is a placeholder rather than a bound the
-    /// estimator enforces. Through the [`Estimator`] trait the same value is
-    /// `Option`-wrapped precisely so "no ceiling yet" cannot read as
-    /// "uncapped target"; inherent methods win name resolution, so an
-    /// unqualified call here is the raw view.
-    pub fn confidence_ceiling(&self) -> f32 {
+    /// Crate-internal, and deliberately not sharing a name with
+    /// [`Estimator::confidence_ceiling`]: a fused measurement needs an
+    /// unconditional bound to clamp against, whereas every reader outside this
+    /// crate must go through the `Option` view so that "no target registered"
+    /// can never be misread as "this target is uncapped".
+    pub(crate) fn clamp_ceiling(&self) -> f32 {
         self.confidence_ceiling
     }
 
@@ -214,9 +209,13 @@ impl Default for FingerprintEstimator {
 }
 
 impl Estimator for FingerprintEstimator {
-    /// The stored ceiling is only meaningful once a target is registered
-    /// (the field defaults to `1.0`, which is not yet an enforced bound), so
-    /// this reports `None` before the first successful `register_target`.
+    /// The only public view of the ceiling this estimator enforces, which is
+    /// deliberate: the field defaults to `1.0` before any target exists, and a
+    /// bare `1.0` there would read as "this target is uncapped" rather than
+    /// "no bound has been computed yet". So this is `None` until the first
+    /// successful `register_target`, and a caller that opted into
+    /// [`UntrackablePolicy::TrackWithReducedConfidence`] reads the price of
+    /// that opt-in here.
     fn confidence_ceiling(&self) -> Option<f32> {
         self.target.is_some().then_some(self.confidence_ceiling)
     }
@@ -565,7 +564,6 @@ mod tests {
         // convention 2: absence is not a value).
         let mut est = FingerprintEstimator::new();
         assert_eq!(Estimator::confidence_ceiling(&est), None);
-        assert_eq!(est.confidence_ceiling(), 1.0, "the inherent view is the raw field");
 
         // A refused registration stores no target, so it computes no ceiling.
         let refused = est.register_target(TargetDescription::new(gradient_template()));
@@ -624,7 +622,7 @@ mod tests {
         )
         .expect("explicit opt-in must be honoured");
 
-        let ceiling = est.confidence_ceiling();
+        let ceiling = Estimator::confidence_ceiling(&est).expect("registration succeeded");
         assert!(
             (MIN_CONFIDENCE_CEILING..0.1).contains(&ceiling),
             "a 1.000-self-similar template must be capped near the floor, got {ceiling}"
@@ -642,9 +640,9 @@ mod tests {
         )
         .expect("distinctive template is trackable regardless of policy");
         assert!(
-            est.confidence_ceiling() > 0.5,
-            "distinctive template capped at {}",
-            est.confidence_ceiling()
+            Estimator::confidence_ceiling(&est).is_some_and(|c| c > 0.5),
+            "distinctive template capped at {:?}",
+            Estimator::confidence_ceiling(&est)
         );
     }
 
@@ -665,7 +663,7 @@ mod tests {
                 .tracking_ambiguous_appearance(),
         )
         .expect("opt-in accepted");
-        let capped = lax.confidence_ceiling();
+        let capped = Estimator::confidence_ceiling(&lax).expect("opt-in accepted");
 
         assert!(
             good.confidence > capped,

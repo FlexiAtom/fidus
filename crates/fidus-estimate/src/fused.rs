@@ -292,7 +292,7 @@ impl Estimator for FusedEstimator {
         // measurement.  If this cap is ever removed, the failure mode is a
         // silent fictitious position, not an error; the registration policy's
         // explicit reduced-confidence opt-in is the only safe fallback.
-        let cap = self.l1.confidence_ceiling();
+        let cap = self.l1.clamp_ceiling();
         let l1 = l1.map(|mut a| {
             a.confidence = a.confidence.min(cap);
             a
