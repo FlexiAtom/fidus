@@ -1270,4 +1270,52 @@ mod tests {
             let _ = localizability(&img); // must not panic
         }
     }
+
+    /// A frame of arbitrary size with a distinctive patch at `(px, py)`, for
+    /// geometries the fixed `W`/`H` scaffolding cannot express.
+    fn frame_sized_with_patch(w: u32, h: u32, px: u32, py: u32, s: u32) -> Frame {
+        let mut data = vec![0u8; (w * h * 4) as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let v = (100 + ((x / 8 + y / 8) % 3) * 4) as u8;
+                PixelFormat::Xrgb8888.write_rgba(&mut data, ((y * w + x) * 4) as usize, [v, v, v, 255]);
+            }
+        }
+        for y in py..(py + s) {
+            for x in px..(px + s) {
+                let v = hash_luma(x - px, y - py);
+                PixelFormat::Xrgb8888.write_rgba(&mut data, ((y * w + x) * 4) as usize, [v, v, v, 255]);
+            }
+        }
+        Frame { width: w, height: h, stride: w * 4, format: PixelFormat::Xrgb8888, data }
+    }
+
+    #[test]
+    fn cold_whole_output_request_is_rejected_above_roughly_1080p() {
+        // With no prior fix the fused estimator asks for a half-extent of
+        // `max(w, h) + max(tw, th)` — the whole output. That request is priced
+        // by `MAX_SEARCH_POSITIONS` *before* clamping to the frame, so the
+        // guard meant for untrusted `SearchRoi` input also fires on our own
+        // cold start, and it fires on the geometry rather than the target.
+        let s = 96;
+        let tpl = patch_template(s, s);
+        let small = frame_sized_with_patch(1366, 768, 500, 300, s);
+        let large = frame_sized_with_patch(1920, 1080, 700, 400, s);
+        let cold = |f: &Frame| SearchRoi {
+            center: (f.width as f64 / 2.0, f.height as f64 / 2.0),
+            half: f.width.max(f.height) as f64 + f64::from(s),
+        };
+        assert!(
+            match_template(&small, &tpl, cold(&small)).is_some(),
+            "a 1366-wide cold start must search"
+        );
+        assert!(
+            match_template(&large, &tpl, cold(&large)).is_none(),
+            "a 1920-wide cold start must be cap-rejected"
+        );
+        // Same large frame, ordinary window: found. So the rejection above is
+        // the position cap, not a missing target.
+        let tight = SearchRoi { center: (748.0, 448.0), half: 200.0 };
+        assert!(match_template(&large, &tpl, tight).is_some());
+    }
 }
