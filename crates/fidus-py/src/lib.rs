@@ -409,7 +409,16 @@ impl Fidus {
     /// afterwards (host-measured on the shipped wheel). A test fixture that
     /// configures attributes by name therefore makes any "advertised == applied"
     /// comparison vacuously true. `del` is not a repair: it removes the getter
-    /// itself, so the attribute then fails to exist on every instance too.
+    /// itself, so the attribute then fails to exist on every instance too, in a
+    /// clean process exactly as in a polluted one. The reversible teardown
+    /// snapshots the descriptor and puts it back:
+    /// ``saved = vars(Fidus)["confidence_ceiling"]`` …
+    /// ``setattr(Fidus, "confidence_ceiling", saved)``, which restores the
+    /// getter and the per-instance reading bit for bit (host-measured). Both
+    /// halves of that are load-bearing: `vars()` returns a read-only mapping
+    /// proxy, so there is no pop-the-entry route, and instances have no
+    /// `__dict__`, so the class is the only place this can be written and the
+    /// only place it can be cleaned.
     #[getter]
     fn confidence_ceiling(&self) -> Option<f32> {
         self.engine
