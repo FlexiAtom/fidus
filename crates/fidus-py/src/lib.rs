@@ -277,9 +277,14 @@ impl Fidus {
     /// desktop repeats); repeats along vectors that are neither horizontal nor
     /// vertical, which are still sampled only at the fine radii; and large
     /// renders, where a work budget drops whole axes rather than sampling them
-    /// thinly — measured, `600×400` keeps its vertical axis and `900×600` keeps
-    /// neither, falling back to the fine radii. Whether a given template fits is
-    /// computable from its size; see [`Self::confidence_ceiling`] and
+    /// thinly. The budget is computable from the template's own size, so a host
+    /// can check a render before registering it: for each axis, with `n` pixels
+    /// along that axis and `m` along the other, the sweep costs
+    /// `Σ (n − l) · m` over the lags `l ∈ [2, n/2]` excluding the four fine
+    /// radii. Both axes are priced, the cheaper one is kept first, and an axis is
+    /// dropped whole once the running total would pass 60,000,000 pixel-products.
+    /// That is why `600×400` keeps its vertical axis and `900×600` keeps neither,
+    /// falling back to the fine radii. See [`Self::confidence_ceiling`] and
     /// `docs/spec.md` §11.1.
     #[pyo3(signature = (img, ambiguous = false))]
     fn register_target(&mut self, img: &Bound<'_, PyAny>, ambiguous: bool) -> PyResult<()> {
@@ -305,11 +310,19 @@ impl Fidus {
     ///   The first few matches right after the target moves — including a move
     ///   the host itself made — are a **settle transient**, not fresh accuracy:
     ///   the constant-velocity filter converges on the step with a brief,
-    ///   lightly overshooting response over roughly three-to-five estimates, so
-    ///   those readings trail the real position even though the on-screen target
-    ///   is already where you put it. To tell "settled" from "still converging,"
-    ///   require two adjacent matches to differ by no more than your tolerance;
-    ///   a full miss (a following `coasting`/`exception`) then re-acquisition
+    ///   lightly overshooting response, so those readings trail the real position
+    ///   even though the on-screen target is already where you put it. The trail
+    ///   is proportional to the step and shrinks as the gap between reads grows:
+    ///   measured on a 216 px move, the first reading trailed by
+    ///   `-18.1 / -10.0 / -12.5` px at first-read intervals of 1.07 / 1.32 / 1.16 s
+    ///   (see `docs/spec.md` §11.3b for why this is not a stale capture).
+    ///   To tell "settled" from "still converging," require two adjacent matches to
+    ///   differ by no more than your tolerance — but give it enough readings for
+    ///   that to mean anything: on a 20 px move, four consecutive matches still
+    ///   differed by 3.6–4.4 px and it took six to reach 0.36 px. This rule
+    ///   judges the transient and nothing else; a *stable wrong lock* also
+    ///   produces neighbours that agree, see [`Self::register_target`].
+    ///   A full miss (a following `coasting`/`exception`) then re-acquisition
     ///   instead resets the track and snaps to the new position in one step, and
     ///   so does registering the target again — which is how to ask for one
     ///   clean reading immediately rather than waiting out the settle.
@@ -357,6 +370,16 @@ impl Fidus {
     /// This is the value that was previously only observable by watching
     /// `estimate` plateau; exposing it lets a host distinguish "capped by a
     /// weak appearance" from "genuinely low this frame."
+    ///
+    /// Read-only with one hole worth knowing about, because it silently defeats
+    /// the check above: assigning to the attribute on an *instance* raises
+    /// `AttributeError`, but assigning to `Fidus.confidence_ceiling` writes an
+    /// entry in the class dict, and attribute lookup consults that dict before
+    /// the getter — so a single class-level assignment shadows the reported
+    /// ceiling for **every** instance in the process, including engines created
+    /// afterwards (host-measured on the shipped wheel). A test fixture that
+    /// configures attributes by name therefore makes any "advertised == applied"
+    /// comparison vacuously true.
     #[getter]
     fn confidence_ceiling(&self) -> Option<f32> {
         self.engine
