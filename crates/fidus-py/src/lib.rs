@@ -247,6 +247,17 @@ impl Fidus {
     /// visible content is genuinely trackable. Crop the template to the opaque
     /// content, or composite it over a representative background, first.
     ///
+    /// # If registration fails, nothing changes
+    /// A refused `register_target` is a no-op on live state: the previously
+    /// registered target stays registered and keeps being tracked. So after a
+    /// failure [`Self::confidence_ceiling`] still reports *that* target's
+    /// ceiling and `estimate` still returns its readings — the failure signal
+    /// is the exception alone, never the ceiling. This is deliberate, and it is
+    /// the opposite of [`Self::calibrate_once`], which clears the frame first so
+    /// a half-solved map can never be used. One consequence for recovery loops:
+    /// re-registering to flush the filter (see [`Self::estimate`]) does nothing
+    /// at all if that re-registration is itself refused.
+    ///
     /// Capture hygiene: a grab taken while the target window is *focused* may
     /// carry compositor decorations (niri's focus ring, for instance, draws a
     /// solid `#7fc8ff` rectangle behind the window). Those pollute the template
@@ -325,12 +336,27 @@ impl Fidus {
     ///   A full miss (a following `coasting`/`exception`) then re-acquisition
     ///   instead resets the track and snaps to the new position in one step, and
     ///   so does registering the target again — which is how to ask for one
-    ///   clean reading immediately rather than waiting out the settle.
+    ///   clean reading immediately rather than waiting out the settle, and also
+    ///   how to end the runaway described above. Re-registering is the *only*
+    ///   flush: `calibrate_once` replaces the coordinate frame and leaves the
+    ///   filter state untouched, so it can neither shorten a transient nor
+    ///   recover a runaway, and it is orders of magnitude more expensive.
     /// * **coasting** — a prior fix exists but this frame matched nothing:
     ///   returns the Kalman-extrapolated track position with
     ///   `confidence == 0.0` and does **not** raise. Treat `confidence == 0.0`
     ///   as "no measurement this frame — discard the coordinates," never as a
-    ///   weak-but-real reading.
+    ///   weak-but-real reading. A stretch of coasting can also be **terminal**:
+    ///   each coasting call advances the prediction by the velocity the last
+    ///   measurement taught it, nothing re-measures that velocity, and there is
+    ///   no re-acquisition timeout (`FidusTargetLost` is reserved for the case
+    ///   where no prior fix ever existed). So if a large displacement inflated
+    ///   the velocity and the screen then goes still, both layers keep missing
+    ///   and the reported position marches away at constant speed indefinitely —
+    ///   still labelled `confidence == 0.0`, which is the honest signal, and
+    ///   recoverable only by re-registering the target. Do not read per-call
+    ///   timing as a health signal either: a host measured the interval roughly
+    ///   halving during exactly this state, and nothing in the reported values
+    ///   explains why.
     /// * **exception** — `FidusTargetLost` (never had a fix) or
     ///   `FidusNotCalibrated`. These are genuine failures and are raised, not
     ///   returned as sentinels (spec §4.5); `confidence == 0.0` is the single
@@ -367,6 +393,9 @@ impl Fidus {
     /// it once after registering to know how far below `1.0` every subsequent
     /// `estimate` on this target is capped — and
     /// **not** a per-frame health signal (that is `estimate`'s own return).
+    /// After a *refused* re-registration it still describes the target that is
+    /// still being tracked, so it cannot tell you whether registering worked
+    /// (see [`Self::register_target`]).
     /// This is the value that was previously only observable by watching
     /// `estimate` plateau; exposing it lets a host distinguish "capped by a
     /// weak appearance" from "genuinely low this frame."
@@ -379,7 +408,8 @@ impl Fidus {
     /// ceiling for **every** instance in the process, including engines created
     /// afterwards (host-measured on the shipped wheel). A test fixture that
     /// configures attributes by name therefore makes any "advertised == applied"
-    /// comparison vacuously true.
+    /// comparison vacuously true. `del` is not a repair: it removes the getter
+    /// itself, so the attribute then fails to exist on every instance too.
     #[getter]
     fn confidence_ceiling(&self) -> Option<f32> {
         self.engine

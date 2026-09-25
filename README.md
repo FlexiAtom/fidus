@@ -90,7 +90,7 @@ Window ID 2:
     Window offset in tile: 0 x 0
 ```
 
-合成器的内部状态里，每个窗口的位置一清二楚。它通过自己的 IPC 讲得明明白白，**但 Wayland 协议这一侧一个字都不说**。而 fidus 不能去读 `niri msg`——那是绑定单一合成器的私有 IPC，违反原则 3（只依赖最普适的原语），且换个合成器立刻失效。
+合成器的内部状态里当然有位置，但**对外一律不给**：Wayland 协议这一侧一个字都不说（见下）。而"绕道私有 IPC"这条路在本机也**不通**——niri 26.04（`8ed0da4`，单输出）实测：`niri msg -j windows` 的 layout 字段全集是 `pos_in_scrolling_layout / tile_size / window_size / tile_pos_in_workspace_view / window_offset_in_tile`，**没有任何全局 x/y**，唯一可当原点的 `tile_pos_in_workspace_view` 8/8 为 `null`；`niri msg -j layers` 更是零几何（只有 `namespace / output / layer / keyboard_interactivity`）。也就是说，即便 fidus 愿意违反原则 3（只依赖最普适的原语、绑死单一合成器），私有 IPC 那一侧同样只讲到**尺寸与平铺结构**为止。
 
 连**特权**协议也一样守口如瓶。`zwlr_foreign_toplevel_management_v1` 能列出系统里所有窗口，它给的事件是：
 
