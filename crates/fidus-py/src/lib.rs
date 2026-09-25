@@ -354,9 +354,22 @@ impl Fidus {
     ///   and the reported position marches away at constant speed indefinitely —
     ///   still labelled `confidence == 0.0`, which is the honest signal, and
     ///   recoverable only by re-registering the target. Do not read per-call
-    ///   timing as a health signal either: a host measured the interval roughly
-    ///   halving during exactly this state, and nothing in the reported values
-    ///   explains why.
+    ///   timing as a health signal either. A host that measured calls in phase
+    ///   found one `estimate` costing 47 ms in this state against 163–287 ms
+    ///   while locked, and the reason is in the matcher: the coarse pass scans
+    ///   the search window *after* clamping it to the frame, so a prediction
+    ///   that has run off-screen shrinks the work to a handful of samples.
+    ///   Duration is therefore a state signal rather than a health signal, and
+    ///   the inference is not reversible — the same host saw one tier spread by
+    ///   2.4x across runs. (An earlier revision of this paragraph said the call
+    ///   interval *halved* in this state; the host that measured it has since
+    ///   retracted that as a property of its own loop, three later runs
+    ///   disagreeing about the direction.) Coasting is also not where such a
+    ///   failure begins: that same host, checking against an independent
+    ///   ruler, saw the reported position already wrong by 430–1015 px while
+    ///   `confidence` sat exactly at [`Self::confidence_ceiling`], and only
+    ///   later in the same runaway did it fall to `0.0`. So `confidence != 0.0`
+    ///   is not evidence that a reading is correct.
     /// * **exception** — `FidusTargetLost` (never had a fix) or
     ///   `FidusNotCalibrated`. These are genuine failures and are raised, not
     ///   returned as sentinels (spec §4.5); `confidence == 0.0` is the single
