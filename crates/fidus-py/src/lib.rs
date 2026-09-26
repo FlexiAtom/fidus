@@ -247,17 +247,42 @@ impl Fidus {
     ///
     /// It is not readable from any platform window API, so it is your belief about
     /// your own drawing, and the engine takes it as nothing more than a search
-    /// hint: the first estimate scans `1.5·template + 48 px` around it instead of
-    /// the whole capture. A wrong belief therefore cannot fabricate a position —
-    /// it costs the first few estimates, after which the window widens per miss
-    /// exactly as it does for a lost track.
+    /// hint: the first estimate scans a square window centered on it, reaching
+    /// `1.5 · max(tpl_w, tpl_h) + 48` pixels on *both* sides — the belief is
+    /// converted into the matcher's anchor space, which names where the
+    /// template's top-left would sit, so the window is symmetric and its reach is
+    /// measured center-to-center. Two details have cost hosts reads: that extent
+    /// is in **physical** pixels — the margin is not scaled either — so a 60×40
+    /// logical render on a 2.0-scale output reaches 228 px, where arithmetic left
+    /// in logical pixels gives 138; and the reach is per-axis (Chebyshev), so a
+    /// target whose center is within it diagonally is inside this read's window.
+    /// A wrong belief cannot fabricate a position: it spends margin in the
+    /// direction you shifted and costs the first few estimates, after which the
+    /// window widens 64 px per miss exactly as it does for a lost track.
     ///
     /// Two costs travel with registering, and both are the engine's to state:
     /// registering **always** drops the fix, so every re-registration pays a fresh
     /// cold start; and the beliefless version of that request is priced against
-    /// the *output's* own size, so on a 1920-wide screen it is refused outright
-    /// and raises `FidusTargetLost` every time, whatever is on screen. Passing the
-    /// belief is the only way to ask for a big render on a big screen.
+    /// the window it *asks for*, before any clipping to the screen — it asks for
+    /// `max(frame) + max(tpl)` px of half-extent, and is refused once that passes
+    /// 1999.5 px. Measured boundaries: 634 px of template on a 1366-wide output,
+    /// 80 px on a 1920-wide one — one pixel larger and the read is refused. The
+    /// refusal looks like an empty screen: it raises `FidusTargetLost` every time,
+    /// whatever is on screen, and nothing reports the arithmetic. Passing the
+    /// belief is the only way to ask for a big render on a big screen: a believed
+    /// request is narrowed to the widest window the guard allows instead of being
+    /// refused.
+    ///
+    /// # The three rungs when a read does not land
+    /// In this order: one — search a **narrow window on the belief**, i.e. pass
+    /// `initial_center` at the center you actually drew at. Two — **retry without
+    /// one**: re-register the same render with `initial_center=None`. That is a
+    /// different request and not a repeat, because nothing carries a belief (or a
+    /// fix) across a registration, so this read really does price the **whole
+    /// output** — and on a large output it may instead be the refusal above,
+    /// which is the signal to stop. Three — only now fall back to a synthetic
+    /// coordinate of your own. Skipping from one straight to three throws away the
+    /// only rung that reports a measurement rather than a guess.
     ///
     /// # Choosing a template that will register
     /// The appearance gate scores the template's self-similarity on its
@@ -293,6 +318,20 @@ impl Fidus {
     /// its left used to register at ceiling `0.9759` (measured) and is now
     /// refused as `FidusUntrackable`; with `ambiguous = True` it registers, but
     /// its ceiling falls to the floor `0.05`.
+    ///
+    /// `ambiguous = True` is a **refusal-gate switch and nothing more**. It
+    /// changes no scoring, applies no mask, and never claims — anywhere visible
+    /// to you — that this render has more than one plausible location. Its
+    /// effect is also conditional in a way that has misled a host: it only ever
+    /// fires on a render the gate *would have refused*. On one the gate accepts,
+    /// it is inert — the ceiling is whatever `1 − self-similarity` produced, and
+    /// passing the flag expecting a warning yields a number that looks exactly
+    /// like the one you got without it. That is a correct reading, not a silent
+    /// failure: the flag is how you say "I know this appearance is weak and want
+    /// a best-effort track anyway", and the price is that the resulting
+    /// confidence is labelled weak, not that anything else changes. To tell the
+    /// two cases apart, compare the ceiling you get against the floor: `0.05`
+    /// means the flag fired; anything else means it did not.
     ///
     /// What that floor buys — and what it does not. Before the sweep, the coarse
     /// repeat was a *silent* mis-lock: on a scripted screen repeating every 32
@@ -393,8 +432,18 @@ impl Fidus {
     ///   that has run off-screen shrinks the work to a handful of samples.
     ///   The full price is a product of two terms, not one: roughly
     ///   `2 · (window positions / 3) · (template area / 9)` — the coarse grid
-    ///   walks the clamped window at a 3 px stride, and each sample compares the
-    ///   whole template, itself downsampled by that same stride. Cost is
+    ///   walks the clamped window at a 3 px stride, a constant that depends on
+    ///   neither the template nor the window size, and each sample compares the
+    ///   whole template, itself downsampled by that same stride. Keep the two
+    ///   windows apart when recomputing that: the **refusal** is priced on the
+    ///   window you *asked for* — `(2·half + 1)²` against a 16 000 000-position
+    ///   cap, before any clipping — while the **work** happens on whatever is
+    ///   left after clipping to the frame. Off-screen they differ by orders of
+    ///   magnitude, so a cost curve derived from geometry has to clamp first and
+    ///   a cap check must not. Both numbers are reproduced in-repo, per size, by
+    ///   `belief_window_cost_curve` and `cold_start_cost_breakdown` (both
+    ///   `--ignored` measurements in `fidus-estimate`).
+    ///   Cost is
     ///   therefore **non-monotone** in template size: measured on a 1366×768
     ///   output the work peaks near a 400 px template edge and falls again past
     ///   it, which is why one host's 633 px render cost no more than its 600 px
@@ -419,9 +468,16 @@ impl Fidus {
     ///   truth hundreds of pixels away is invisible to both layers at once, for as
     ///   long as the copy is there. The engine's own tests reproduce it: twelve
     ///   consecutive reads at the ceiling bought nothing toward recovery, and the
-    ///   far target was found on the fifth read only after the copy was removed.
-    ///   Re-registering — with `initial_center` near where you actually put the
-    ///   window — is the exit; waiting is not one.
+    ///   far target was then acquired on the **sixth** read with the copy gone —
+    ///   which is arithmetic, not luck: the remaining distance divided by the
+    ///   64 px each miss buys back, rounded up, plus one. So the read count is a
+    ///   statement about geometry and nothing else, and no amount of patience
+    ///   lowers it while a copy keeps scoring. Re-registering — with
+    ///   `initial_center` near where you actually put the window — is the exit;
+    ///   waiting is not one. It is also the cheap one: a host recovering from
+    ///   exactly this runaway measured re-registration at 31.8 ms and was back
+    ///   within 5 px on the first read; the same recovery *plus* a
+    ///   `calibrate_once` cost that host 2207.7 ms for no better position.
     /// * **exception** — `FidusTargetLost` (never had a fix) or
     ///   `FidusNotCalibrated`. These are genuine failures and are raised, not
     ///   returned as sentinels (spec §4.5); `confidence == 0.0` is the single
@@ -453,6 +509,21 @@ impl Fidus {
     /// repetition *longer* than the template is a property of the desktop, and
     /// large templates can fall back to the four fine radii under the work
     /// budget.
+    ///
+    /// Which is why it is a bound and **not** a quality score to rank renders
+    /// against one another: across template sizes it moves the wrong way. A
+    /// small render repeats inside itself cheaply, so it advertises a *high*
+    /// ceiling while being the least localizable thing on screen; a large
+    /// distinctive one advertises a low ceiling while being the most reliable.
+    /// A host measured precisely that inversion on one live subject — the render
+    /// that reported a position 124 px off claimed `0.371`, the render that was
+    /// right by `0.00` px claimed `0.069`, 5.4x apart — and it noted that only
+    /// the *direction* survives a change of subject, not the values, which drift
+    /// batch to batch (the same render was seen at `0.289`, `0.360` and `0.371`).
+    /// So: comparing ceilings inside one size class is meaningful; sorting
+    /// candidates *across* sizes by ceiling selects the smallest and most
+    /// misleading render, which is the opposite of the choice the number appears
+    /// to recommend. Take the larger render and let its ceiling be low.
     ///
     /// It is a **constant for the lifetime of one `register_target`** — read
     /// it once after registering to know how far below `1.0` every subsequent
