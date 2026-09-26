@@ -56,6 +56,11 @@ fn finite_nonnegative(value: f64, fallback: f64) -> f64 {
 }
 
 /// The fused L7 estimator (P2-c).
+///
+/// Its first estimate searches around the caller's `initial_center` belief when
+/// one was registered, and the whole capture when none was; after a fix the
+/// window follows the track, widening per miss. The belief is a search input
+/// only — never absorbed, so nothing the caller asserts enters the filter.
 pub struct FusedEstimator {
     /// The L1 layer: target storage and template matching.
     l1: FingerprintEstimator,
@@ -272,13 +277,18 @@ impl Estimator for FusedEstimator {
         let l1 = {
             let (center, half) = match predicted {
                 Some(p) => (p, self.search_half(&tpl)),
-                None => {
-                    let (tw, th) = (tpl.width().max(tpl.height()) as f64, tpl.height() as f64);
-                    (
-                        PhysicalPoint::new(fw as f64 / 2.0, fh as f64 / 2.0),
-                        fw.max(fh) as f64 + tw.max(th),
-                    )
-                }
+                // The prior selects a window and is never absorbed, so the first
+                // reading the filter takes is still a match, not the caller's word.
+                None => match self.l1.initial_center() {
+                    Some(c) => (frame.logical_to_physical(c), self.search_half(&tpl)),
+                    None => {
+                        let (tw, th) = (tpl.width().max(tpl.height()) as f64, tpl.height() as f64);
+                        (
+                            PhysicalPoint::new(fw as f64 / 2.0, fh as f64 / 2.0),
+                            fw.max(fh) as f64 + tw.max(th),
+                        )
+                    }
+                },
             };
             l1_match(&img, frame, &tpl, SearchRoi { center: (center.x, center.y), half })
         };

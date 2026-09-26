@@ -238,6 +238,19 @@ impl Fidus {
     /// rejection is `TypeError`/`ValueError` (host-side input faults, not
     /// engine behaviour) and nothing is clamped, transposed or padded.
     ///
+    /// # Telling the engine where you drew it (`initial_center`)
+    /// Pass `(x, y)` in the **same calibrated logical space** [`Self::estimate`]
+    /// returns — the layer-shell usable-area coordinates of the calibrated
+    /// output, which is where your own surface margins are expressed. It is not
+    /// readable from any platform window API, so it is your belief about your own
+    /// drawing, and the engine takes it as nothing more than a search hint: the
+    /// first estimate then scans a window of `1.5·template + 48 px` around it
+    /// instead of the whole capture. A wrong belief therefore cannot fabricate a
+    /// position — it costs the first few estimates, after which the window widens
+    /// per miss exactly as it does for a lost track. Omitting it keeps the
+    /// whole-capture search, which on a large output or a large render is either
+    /// seconds of cost or a refusal (`FidusTargetLost`) by the position budget.
+    ///
     /// # Choosing a template that will register
     /// The appearance gate scores the template's self-similarity on its
     /// **luma** plane, and the alpha channel is **not** a mask there: an
@@ -297,8 +310,13 @@ impl Fidus {
     /// That is why `600×400` keeps its vertical axis and `900×600` keeps neither,
     /// falling back to the fine radii. See [`Self::confidence_ceiling`] and
     /// `docs/spec.md` §11.1.
-    #[pyo3(signature = (img, ambiguous = false))]
-    fn register_target(&mut self, img: &Bound<'_, PyAny>, ambiguous: bool) -> PyResult<()> {
+    #[pyo3(signature = (img, ambiguous = false, initial_center = None))]
+    fn register_target(
+        &mut self,
+        img: &Bound<'_, PyAny>,
+        ambiguous: bool,
+        initial_center: Option<(f64, f64)>,
+    ) -> PyResult<()> {
         let image = parse_rgba(img)?;
         let engine = self
             .engine
@@ -307,6 +325,12 @@ impl Fidus {
         let mut target = TargetDescription::new(image);
         if ambiguous {
             target = target.tracking_ambiguous_appearance();
+        }
+        if let Some((x, y)) = initial_center {
+            if !x.is_finite() || !y.is_finite() {
+                return Err(PyValueError::new_err("initial_center must be finite"));
+            }
+            target = target.with_initial_center(LogicalPoint::new(x, y));
         }
         engine.register_target(target).map_err(estimate_error)
     }

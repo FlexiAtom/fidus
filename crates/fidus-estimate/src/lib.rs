@@ -204,6 +204,15 @@ impl FingerprintEstimator {
         }
         Some(t.template_logical.resample(tw, th))
     }
+
+    /// The caller's belief about where it drew the target, if it stated one.
+    ///
+    /// Crate-internal like [`Self::clamp_ceiling`], and for the same reason: the
+    /// `Option` is the whole signal, so a fused caller must not be handed a
+    /// default-constructed point to mistake for a belief.
+    pub(crate) fn initial_center(&self) -> Option<LogicalPoint> {
+        self.target.as_ref().and_then(|t| t.initial_center)
+    }
 }
 
 impl Default for FingerprintEstimator {

@@ -476,3 +476,128 @@ fn a_confident_false_hit_pins_the_window_that_would_have_rescued_it() {
          on read {acquired_on} means those hits did not reset the streak"
     );
 }
+
+/// A capture of `BW × BH` with one `BS²` patch of the same hash texture the
+/// other fixtures use, at a fixed physical top-left.
+struct BigOutput {
+    top_left: (i64, i64),
+}
+
+const BW: u32 = 1920;
+const BH: u32 = 1080;
+const BS: u32 = 96;
+
+impl CaptureIo for BigOutput {
+    fn capture(&mut self) -> Result<Frame, CaptureError> {
+        let format = PixelFormat::Argb8888;
+        let mut data = vec![90u8; (BW * BH * 4) as usize];
+        let (tx, ty) = self.top_left;
+        for yy in 0..BS {
+            for xx in 0..BS {
+                let (px, py) = (tx + xx as i64, ty + yy as i64);
+                if px < 0 || py < 0 || px >= BW as i64 || py >= BH as i64 {
+                    continue;
+                }
+                let i = (py as u32 * BW + px as u32) as usize * 4;
+                format.write_rgba(&mut data, i, pattern(xx, yy, 0));
+            }
+        }
+        Ok(Frame { width: BW, height: BH, stride: BW * 4, format, data })
+    }
+}
+
+/// The same desktop at 1× — the scale where "logical" and "capture pixel"
+/// coincide, so a belief can be written down without a second conversion.
+fn big_frame() -> CoordinateFrame {
+    let corr: Vec<_> = [(0.0, 0.0), (640.0, 0.0), (0.0, 420.0), (640.0, 420.0)]
+        .into_iter()
+        .map(|(x, y)| (LogicalPoint::new(x, y), PhysicalPoint::new(x, y)))
+        .collect();
+    let quality = CalibrationQuality {
+        rms_residual_px: 0.0,
+        max_residual_px: 0.0,
+        verification_max_err_px: 0.0,
+        consistency_max_err_px: 0.0,
+        sample_count: 4,
+        independent_passes: 2,
+    };
+    CoordinateFrame::new(
+        AffineTransform::from_correspondences(&corr).expect("well-conditioned"),
+        (BW, BH),
+        CalibrationMethod::Crosshair,
+        quality,
+        SystemTime::now(),
+    )
+    .expect("invertible")
+}
+
+fn big_template() -> RgbaImage {
+    let mut data = Vec::with_capacity((BS * BS * 4) as usize);
+    for y in 0..BS {
+        for x in 0..BS {
+            data.extend_from_slice(&pattern(x, y, 0));
+        }
+    }
+    RgbaImage::from_raw(BS, BS, data)
+}
+
+/// The crossing MeaPet measured on a real desktop, reproduced on pure CPU: a
+/// cold start with no belief asks for the whole output, and the position budget
+/// prices that request against the *output* — so it is refused on a 1920-wide
+/// screen whatever the target looks like. The same screen, the same render and
+/// a belief at the truth need a template-derived window instead, which fits.
+#[test]
+fn a_belief_replaces_the_whole_output_scan_the_budget_refuses() {
+    let (tx, ty) = (1400_i64, 700_i64);
+    let half = f64::from(BS) / 2.0;
+    let belief = LogicalPoint::new(tx as f64 + half, ty as f64 + half);
+    let mut io = BigOutput { top_left: (tx, ty) };
+
+    let mut blind = FusedEstimator::new();
+    blind
+        .register_target(TargetDescription::new(big_template()))
+        .expect("valid target");
+    assert!(
+        matches!(blind.estimate(&mut io, &big_frame()), Err(EstimateError::TargetLost)),
+        "without a belief the request is the whole output and must be refused"
+    );
+
+    let mut told = FusedEstimator::new();
+    told.register_target(TargetDescription::new(big_template()).with_initial_center(belief))
+        .expect("valid target");
+    let p = told.estimate(&mut io, &big_frame()).expect("a belief must be searched");
+    assert!(
+        (p.position.x - belief.x).abs() < 2.0 && (p.position.y - belief.y).abs() < 2.0,
+        "the belief narrowed the window but did not find the render: {:?}",
+        p.position
+    );
+}
+
+/// A belief that is wrong is a cost, not a trap: while there is no fix, every
+/// miss widens the window by the same 64 px the steady state uses, so the truth
+/// is reached once `228 + 64·n` covers the 440 px from the belief to it — read 5.
+#[test]
+fn a_wrong_belief_costs_reads_and_then_finds_the_target() {
+    let mut clock = Clock::new();
+    // `estimator` places the belief at logical (200, 150); the target sits at
+    // center (450, 340), out of every window until the widening reaches it.
+    let mut est = estimator(&clock);
+    let mut io = FakeOutput { top_left_logical: Some((420.0, 320.0)), salt: 0, gradient: false };
+
+    let mut acquired_on = None;
+    for k in 1..=8 {
+        if let Ok(p) = step(&mut est, &mut io, &mut clock)
+            && (p.position.x - 450.0).abs() < 3.0
+            && (p.position.y - 340.0).abs() < 3.0
+        {
+            acquired_on = Some(k);
+            break;
+        }
+    }
+    let on = acquired_on.expect("a wrong belief must not make the target unfindable");
+    assert_eq!(
+        on, 5,
+        "read {on} rather than the 5 the widening arithmetic predicts — the cold-start \
+         window no longer widens per miss"
+    );
+}
