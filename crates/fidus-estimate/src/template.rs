@@ -1318,4 +1318,119 @@ mod tests {
         let tight = SearchRoi { center: (748.0, 448.0), half: 200.0 };
         assert!(match_template(&large, &tpl, tight).is_some());
     }
+
+    /// The same guard also refuses the runaway's own rescue. The window
+    /// `FusedEstimator` widens by 64 px per missed reading is priced pre-clamp
+    /// too, so past a half-extent of
+    /// `(sqrt(MAX_SEARCH_POSITIONS) − 1) / 2 = 1999.5` px the engine stops
+    /// searching at all — on any output, however small, and however plainly the
+    /// target sits inside it. The crossing is template-derived, not
+    /// screen-derived: `1.5·side + 48 + 64·streak > 1999.5` gives streak 29 for
+    /// a 96² template and streak 17 for a 600² one.
+    #[test]
+    fn a_widened_rescue_window_is_refused_one_miss_past_its_budget() {
+        let s = 96_u32;
+        let base = f64::from(s) * 1.5 + 48.0;
+        let (at_28, at_29) = (base + 64.0 * 28.0, base + 64.0 * 29.0);
+        assert_eq!((at_28, at_29), (1984.0, 2048.0), "knob drift: recompute");
+        assert!(at_28 <= 1999.5 && at_29 > 1999.5, "the crossing is not between these two");
+
+        // Deliberately a small output: everything below is decided by the
+        // requested half-extent alone, so frame size cannot be what the
+        // assertion is actually about.
+        let frame = frame_sized_with_patch(400, 300, 152, 102, s);
+        let tpl = patch_template(s, s);
+        let roi = |half: f64| SearchRoi { center: (200.0, 150.0), half };
+        assert!(
+            match_template(&frame, &tpl, roi(at_28)).is_some(),
+            "the target is dead ahead and the window covers the whole output"
+        );
+        assert!(
+            match_template(&frame, &tpl, roi(at_29)).is_none(),
+            "one miss further out the engine must not search at all — this is the \
+             runaway becoming permanent by construction, not by chance"
+        );
+    }
+
+    /// What an allowed cold start costs, measured rather than asserted. Run
+    /// with `cargo test --release -p fidus-estimate cold_start_cost_breakdown -- --ignored --nocapture`.
+    ///
+    /// Phase 1 is the whole bill: it steps `COARSE_STEP` over the *clamped*
+    /// window and each step correlates a template downsampled by the same
+    /// factor, in two passes per position (mean, then correlation). So work is
+    /// `positions(window/step) x template_area/step^2` — and the two factors
+    /// pull against each other, because the clamped window shrinks faster than
+    /// the template grows once the template is a large fraction of the output.
+    /// Cost is therefore NOT monotone in template size.
+    #[test]
+    #[ignore = "measurement, not a gate: prints timings, so it is inherently machine-dependent"]
+    fn cold_start_cost_breakdown() {
+        let step = i64::from(COARSE_STEP);
+        let half_wall = ((MAX_SEARCH_POSITIONS as f64).sqrt() - 1.0) / 2.0;
+        println!("cap {MAX_SEARCH_POSITIONS}  step {step}  widest allowed half-extent {half_wall}");
+        // The whole-output cold-start request on each of these outputs, plus
+        // one deliberately over the wall to show the refusal costs nothing.
+        for (out, sizes) in [
+            ((1366_u32, 768_u32), vec![96_u32, 200, 400, 600, 633, 634]),
+            // A 1920-wide output cannot ask for the whole frame with a
+            // template larger than ~79 px, but a half-extent just under the
+            // wall still clamps to the entire frame — which is what an
+            // "allowed" 1080p cold start would cost if the guard stopped
+            // pricing the request geometry.
+            ((1920_u32, 1080_u32), vec![79, 200, 600, 800]),
+        ] {
+            for s in sizes {
+                let whole = f64::from(out.0.max(out.1)) + f64::from(s);
+                let half = whole.min(half_wall);
+                let side = (whole * 2.0).ceil() as u64 + 1;
+                if side * side > MAX_SEARCH_POSITIONS {
+                    println!(
+                        "output {out:?}  s={s:4}  requests whole output at pre-clamp {:>12}  -> REFUSED, searched nothing",
+                        side * side
+                    );
+                    continue;
+                }
+                let frame = frame_sized_with_patch(out.0, out.1, 400, 60, s);
+                let tpl = patch_template(s, s);
+                let roi = SearchRoi { center: (f64::from(out.0) / 2.0, f64::from(out.1) / 2.0), half };
+                let gx = (i64::from(out.0) - i64::from(s)) / step + 1;
+                let gy = (i64::from(out.1) - i64::from(s)) / step + 1;
+                let work = 2.0 * (gx * gy) as f64 * f64::from(s * s) / (step * step) as f64;
+                let start = std::time::Instant::now();
+                let found = match_template(&frame, &tpl, roi);
+                let secs = start.elapsed().as_secs_f64();
+                println!(
+                    "output {out:?}  s={s:4}  half {half:>7.1}  grid {gx:>6} x {gy:>6}  \
+                     work {:>6.2}e9  {secs:>7.3} s  {:>4.0} Mwork/s  {:?}",
+                    work / 1e9,
+                    work / 1e6 / secs,
+                    found.map(|m| (m.center.x.round(), m.center.y.round(), m.score as f32)),
+                );
+            }
+        }
+        // And what a 1080p cold start would cost if the guard priced the
+        // clamped window instead of the request. The widest window the guard
+        // accepts already covers a whole 1920×1080 output, so this is the bill
+        // for "just move the pricing after the clamp" — measured, not
+        // extrapolated.
+        let out = (1920_u32, 1080_u32);
+        for s in [200_u32, 600] {
+            let frame = frame_sized_with_patch(out.0, out.1, 400, 60, s);
+            let tpl = patch_template(s, s);
+            let half = half_wall.floor();
+            let roi = SearchRoi { center: (f64::from(out.0) / 2.0, f64::from(out.1) / 2.0), half };
+            let gx = (i64::from(out.0) - i64::from(s)) / step + 1;
+            let gy = (i64::from(out.1) - i64::from(s)) / step + 1;
+            let work = 2.0 * (gx * gy) as f64 * f64::from(s * s) / (step * step) as f64;
+            let start = std::time::Instant::now();
+            let found = match_template(&frame, &tpl, roi);
+            let secs = start.elapsed().as_secs_f64();
+            println!(
+                "PRICED-POST-CLAMP  output {out:?}  s={s:4}  grid {gx:>6} x {gy:>6}  \
+                 work {:>6.2}e9  {secs:>7.3} s  -> found {}",
+                work / 1e9,
+                found.is_some(),
+            );
+        }
+    }
 }
