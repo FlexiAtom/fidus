@@ -127,6 +127,36 @@ impl CaptureIo for FakeOutput {
     }
 }
 
+/// The registered appearance drawn at two independent places, so a test can
+/// put a copy on screen that the caller does not consider the target.
+/// Appearance alone cannot tell these apart — that is the whole point.
+struct TwoInstances {
+    near: Option<(f64, f64)>,
+    far: Option<(f64, f64)>,
+}
+
+impl CaptureIo for TwoInstances {
+    fn capture(&mut self) -> Result<Frame, CaptureError> {
+        let format = PixelFormat::Argb8888;
+        let mut data = vec![90u8; (W * H * 4) as usize];
+        for (tx, ty) in [self.near, self.far].into_iter().flatten().map(|(lx, ly)| {
+            ((lx * 2.0).round() as i64, (ly * 2.0).round() as i64)
+        }) {
+            for yy in 0..TH * 2 {
+                for xx in 0..TW * 2 {
+                    let (px, py) = (tx + xx as i64, ty + yy as i64);
+                    if px < 0 || py < 0 || px >= W as i64 || py >= H as i64 {
+                        continue;
+                    }
+                    let i = (py as u32 * W + px as u32) as usize * 4;
+                    format.write_rgba(&mut data, i, pattern(xx / 2, yy / 2, 0));
+                }
+            }
+        }
+        Ok(Frame { width: W, height: H, stride: W * 4, format, data })
+    }
+}
+
 /// A scripted clock stepping 600 ms per estimate, so every L8 observation
 /// crosses the differ window.
 struct Clock {
@@ -157,7 +187,7 @@ fn estimator(clock: &Clock) -> FusedEstimator {
 /// Runs one estimate with the clock advanced by one window.
 fn step(
     est: &mut FusedEstimator,
-    io: &mut FakeOutput,
+    io: &mut dyn CaptureIo,
     clock: &mut Clock,
 ) -> Result<fidus_core::estimate::ProbabilisticPosition, EstimateError> {
     let t = clock.tick();
@@ -309,7 +339,7 @@ fn first_search_without_target_is_target_lost() {
 /// at a real host's cadence instead of the fixture's 600 ms default.
 fn step_at(
     est: &mut FusedEstimator,
-    io: &mut FakeOutput,
+    io: &mut dyn CaptureIo,
     clock: &mut Clock,
     ms: u64,
 ) -> Result<fidus_core::estimate::ProbabilisticPosition, EstimateError> {
@@ -375,3 +405,74 @@ fn re_registering_the_target_flushes_the_settle_transient() {
     );
 }
 
+
+/// Reads until the reported position lands within 3 px of `want_logical`,
+/// or `None` if that does not happen inside `limit` reads.
+fn reads_until(
+    est: &mut FusedEstimator,
+    io: &mut dyn CaptureIo,
+    clock: &mut Clock,
+    want_logical: (f64, f64),
+    limit: usize,
+) -> Option<usize> {
+    for k in 1..=limit {
+        let Ok(p) = step(est, io, clock) else { return None };
+        if (p.position.x - want_logical.0).abs() < 3.0 && (p.position.y - want_logical.1).abs() < 3.0
+        {
+            return Some(k);
+        }
+    }
+    None
+}
+
+/// A hit anywhere clears `lost_streak` (`FusedEstimator::absorb`), and
+/// `lost_streak` is the only thing that widens the search window — the window
+/// that both L1 and L8's blob extraction are gated by. So a screen that keeps
+/// returning one exact copy never widens, and widening is the only way a
+/// far-away truth gets found again: the false hit does not merely mislead, it
+/// removes the recovery route.
+#[test]
+fn a_confident_false_hit_pins_the_window_that_would_have_rescued_it() {
+    let near_top = (170.0, 130.0); // center logical (200, 150)
+    let far_top = (420.0, 320.0); // center logical (450, 340)
+    // 628 physical px apart, against a window half-extent of
+    // 1.5·120 + 48 = 228 px at streak 0, growing 64 px per both-layers-miss.
+    let mut clock = Clock::new();
+    let mut est = estimator(&clock);
+    let mut io = TwoInstances { near: Some(near_top), far: None };
+    let _ = step(&mut est, &mut io, &mut clock).expect("first fix on the near copy");
+    let cap = est.confidence_ceiling().expect("a registered target advertises a ceiling");
+
+    // The truth moves away; a copy stays where the track believes it is.
+    io.far = Some(far_top);
+    for k in 1..=12 {
+        let p = step(&mut est, &mut io, &mut clock).expect("a hit is returned, never raised");
+        assert_eq!(
+            p.confidence,
+            cap,
+            "read {k}: an exact copy scores full marks, so confidence sits bit-equal at \
+             the ceiling — the signature a host reported from a real screen"
+        );
+        assert!(
+            (p.position.x - 200.0).abs() < 2.0 && (p.position.y - 150.0).abs() < 2.0,
+            "read {k}: the near copy must hold the track, got {:?}",
+            p.position
+        );
+    }
+
+    // Only now is the decoy removed. Had those twelve confident reads been
+    // misses, the window would already be 228 + 12·64 = 996 px wide and the far
+    // copy reachable on the next read. It is not: recovery lands on the read
+    // predicted from a streak of *zero*. The far copy's top-left sits 440 px
+    // from the belief, so it enters the window once 228 + 64·n ≥ 440, i.e.
+    // n = 4 — the fifth read. Recompute both figures if `search_margin_px` or
+    // `widen_per_miss_px` ever move.
+    io.near = None;
+    let acquired_on = reads_until(&mut est, &mut io, &mut clock, (450.0, 340.0), 10)
+        .expect("the widening window must eventually reach the far copy");
+    assert_eq!(
+        acquired_on, 5,
+        "twelve reads at full ceiling must have bought nothing toward recovery: acquiring \
+         on read {acquired_on} means those hits did not reset the streak"
+    );
+}

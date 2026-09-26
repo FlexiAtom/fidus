@@ -482,6 +482,35 @@ mod tests {
         );
     }
 
+    /// Widening the search window is the engine's only self-rescue, and it is
+    /// driven by `lost_streak` — which *any* absorbed reading resets, correct
+    /// or not. So a screen that keeps returning one exact copy holds the window
+    /// at its narrowest forever, and a truth outside it stays unreachable.
+    #[test]
+    fn any_absorbed_reading_collapses_the_rescue_window() {
+        let mut e = FusedEstimator::new();
+        let tpl = fidus_core::target::RgbaImage::from_raw(96, 96, vec![7u8; 96 * 96 * 4]);
+        let bbox = BoundingBox { x0: 0, y0: 0, x1: 96, y1: 96 };
+
+        let base = 96.0 * 1.5 + e.search_margin_px;
+        assert_eq!(e.search_half(&tpl), base, "at rest the window is template-derived");
+        e.lost_streak = 12;
+        assert_eq!(
+            e.search_half(&tpl),
+            base + 12.0 * e.widen_per_miss_px,
+            "misses must widen, or a lost target could never be found again"
+        );
+
+        e.absorb(LogicalPoint::new(10.0, 10.0), 1.0, bbox);
+        assert_eq!(e.lost_streak, 0);
+        assert_eq!(
+            e.search_half(&tpl),
+            base,
+            "a reading at full confidence — the only kind a false peak produces — resets \
+             the widening, which is why a confident wrong lock is terminal"
+        );
+    }
+
     #[test]
     fn hostile_knob_settings_cannot_break_the_filter() {
         // The fields are pub, so they are untrusted input. None of these may
