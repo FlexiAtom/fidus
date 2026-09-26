@@ -240,16 +240,24 @@ impl Fidus {
     ///
     /// # Telling the engine where you drew it (`initial_center`)
     /// Pass `(x, y)` in the **same calibrated logical space** [`Self::estimate`]
-    /// returns — the layer-shell usable-area coordinates of the calibrated
-    /// output, which is where your own surface margins are expressed. It is not
-    /// readable from any platform window API, so it is your belief about your own
-    /// drawing, and the engine takes it as nothing more than a search hint: the
-    /// first estimate then scans a window of `1.5·template + 48 px` around it
-    /// instead of the whole capture. A wrong belief therefore cannot fabricate a
-    /// position — it costs the first few estimates, after which the window widens
-    /// per miss exactly as it does for a lost track. Omitting it keeps the
-    /// whole-capture search, which on a large output or a large render is either
-    /// seconds of cost or a refusal (`FidusTargetLost`) by the position budget.
+    /// returns — the layer-shell usable-area coordinates of the calibrated output,
+    /// which is where your own surface margins are expressed. Give the **center**
+    /// of the render, not the surface's top-left: the window is built around a
+    /// center, so a corner shifts the search half a render away from the truth.
+    ///
+    /// It is not readable from any platform window API, so it is your belief about
+    /// your own drawing, and the engine takes it as nothing more than a search
+    /// hint: the first estimate scans `1.5·template + 48 px` around it instead of
+    /// the whole capture. A wrong belief therefore cannot fabricate a position —
+    /// it costs the first few estimates, after which the window widens per miss
+    /// exactly as it does for a lost track.
+    ///
+    /// Two costs travel with registering, and both are the engine's to state:
+    /// registering **always** drops the fix, so every re-registration pays a fresh
+    /// cold start; and the beliefless version of that request is priced against
+    /// the *output's* own size, so on a 1920-wide screen it is refused outright
+    /// and raises `FidusTargetLost` every time, whatever is on screen. Passing the
+    /// belief is the only way to ask for a big render on a big screen.
     ///
     /// # Choosing a template that will register
     /// The appearance gate scores the template's self-similarity on its
@@ -383,6 +391,14 @@ impl Fidus {
     ///   while locked, and the reason is in the matcher: the coarse pass scans
     ///   the search window *after* clamping it to the frame, so a prediction
     ///   that has run off-screen shrinks the work to a handful of samples.
+    ///   The full price is a product of two terms, not one: roughly
+    ///   `2 · (window positions / 3) · (template area / 9)` — the coarse grid
+    ///   walks the clamped window at a 3 px stride, and each sample compares the
+    ///   whole template, itself downsampled by that same stride. Cost is
+    ///   therefore **non-monotone** in template size: measured on a 1366×768
+    ///   output the work peaks near a 400 px template edge and falls again past
+    ///   it, which is why one host's 633 px render cost no more than its 600 px
+    ///   one.
     ///   Duration is therefore a state signal rather than a health signal, and
     ///   the inference is not reversible — the same host saw one tier spread by
     ///   2.4x across runs. (An earlier revision of this paragraph said the call
@@ -394,6 +410,18 @@ impl Fidus {
     ///   `confidence` sat exactly at [`Self::confidence_ceiling`], and only
     ///   later in the same runaway did it fall to `0.0`. So `confidence != 0.0`
     ///   is not evidence that a reading is correct.
+    ///   A lock that wrong does not wear itself out either, and the reason is one
+    ///   number running both rescue routes: *any* absorbed reading — right or
+    ///   wrong — clears the miss streak, and that streak is the only thing that
+    ///   widens the search window, which is at the same time L1's scan region
+    ///   **and** the region L8 extracts its blobs from. So while an on-screen copy
+    ///   keeps scoring, the window stays pinned at `1.5·template + 48 px` and a
+    ///   truth hundreds of pixels away is invisible to both layers at once, for as
+    ///   long as the copy is there. The engine's own tests reproduce it: twelve
+    ///   consecutive reads at the ceiling bought nothing toward recovery, and the
+    ///   far target was found on the fifth read only after the copy was removed.
+    ///   Re-registering — with `initial_center` near where you actually put the
+    ///   window — is the exit; waiting is not one.
     /// * **exception** — `FidusTargetLost` (never had a fix) or
     ///   `FidusNotCalibrated`. These are genuine failures and are raised, not
     ///   returned as sentinels (spec §4.5); `confidence == 0.0` is the single
