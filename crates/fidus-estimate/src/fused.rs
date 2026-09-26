@@ -290,7 +290,7 @@ impl Estimator for FusedEstimator {
                     }
                 },
             };
-            l1_match(&img, frame, &tpl, SearchRoi { center: (center.x, center.y), half })
+            l1_match(&img, frame, &tpl, SearchRoi::around_center((center.x, center.y), half, &tpl))
         };
 
         // 4.–6. Fuse and assimilate.

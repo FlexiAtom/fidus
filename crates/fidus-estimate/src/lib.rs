@@ -339,7 +339,7 @@ impl Estimator for FingerprintEstimator {
             },
         };
 
-        let roi = template::SearchRoi { center: (center.x, center.y), half };
+        let roi = template::SearchRoi::around_center((center.x, center.y), half, &tpl);
         let source = MeasurementSource::Single("L1 Fingerprint");
         match l1_match(&frame_img, frame, &tpl, roi) {
             Some(m) => {

@@ -354,14 +354,15 @@ fn step_at(
 /// and there is no reset entry point besides this one.
 ///
 /// Run in MeaPet's regime — an appearance discounted to the ceiling floor, so
-/// every reading is a weak one. The drifted leg also demonstrates the sharper
-/// half of why the ceiling exists: on a *fully* self-similar appearance the
-/// match is located by the search window, so a belief that has already walked
-/// off gets corroborated instead of corrected, and the readings keep leaving a
-/// target that is standing still. A real sprite at ceiling 0.107 does
-/// self-correct (MeaPet's control arm converges to 0.01 px); that difference
-/// belongs to the appearance, not to the filter, and this test is only about
-/// the flush.
+/// every reading is a weak one and the transient needs several reads to pay
+/// off; one read is the lag, and the flush is what removes it.
+///
+/// *How this leg used to be built*: the precondition used to be reached by
+/// drift rather than by lag. While the L1 window was aimed half a render off
+/// its own belief, this fixture never caught a standing target at all, so the
+/// leg below passed on four reads and the test was pinning that offset instead
+/// of a transient. The offset is gone (`SearchRoi::around_center`), and what is
+/// left is the thing the test claims to be about.
 #[test]
 fn re_registering_the_target_flushes_the_settle_transient() {
     let mut clock = Clock::new();
@@ -376,18 +377,15 @@ fn re_registering_the_target_flushes_the_settle_transient() {
     let mut io = FakeOutput { top_left_logical: Some((170.0, 130.0)), salt: 0, gradient: true };
     step_at(&mut est, &mut io, &mut clock, 300).expect("first fix");
 
-    // The target moves once and then stands still at logical x = 308.
+    // The target moves once, to logical x = 308, and stands still there.
     io.top_left_logical = Some((278.0, 130.0));
-    let mut last = 308.0;
-    for _ in 0..4 {
-        last = step_at(&mut est, &mut io, &mut clock, 1270)
-            .expect("a weak measurement is still a measurement")
-            .position
-            .x;
-    }
+    let last = step_at(&mut est, &mut io, &mut clock, 1270)
+        .expect("a weak measurement is still a measurement")
+        .position
+        .x;
     assert!(
         (last - 308.0).abs() > 20.0,
-        "the belief was supposed to be off-target before the flush, got {last}"
+        "the first read after a move is supposed to be mid-transient, got {last}"
     );
 
     // Deliberately *no* belief here. Since the fused cold start began reading
@@ -437,8 +435,9 @@ fn reads_until(
 fn a_confident_false_hit_pins_the_window_that_would_have_rescued_it() {
     let near_top = (170.0, 130.0); // center logical (200, 150)
     let far_top = (420.0, 320.0); // center logical (450, 340)
-    // 628 physical px apart, against a window half-extent of
-    // 1.5·120 + 48 = 228 px at streak 0, growing 64 px per both-layers-miss.
+    // The two centers are 500 px apart along x in capture pixels, against a
+    // window half-extent of 1.5·120 + 48 = 228 px at streak 0, growing 64 px
+    // per both-layers-miss.
     let mut clock = Clock::new();
     let mut est = estimator(&clock);
     let mut io = TwoInstances { near: Some(near_top), far: None };
@@ -465,15 +464,15 @@ fn a_confident_false_hit_pins_the_window_that_would_have_rescued_it() {
     // Only now is the decoy removed. Had those twelve confident reads been
     // misses, the window would already be 228 + 12·64 = 996 px wide and the far
     // copy reachable on the next read. It is not: recovery lands on the read
-    // predicted from a streak of *zero*. The far copy's top-left sits 440 px
-    // from the belief, so it enters the window once 228 + 64·n ≥ 440, i.e.
-    // n = 4 — the fifth read. Recompute both figures if `search_margin_px` or
-    // `widen_per_miss_px` ever move.
+    // predicted from a streak of *zero*. The belief points at the near copy's
+    // center, 500 px in x from the far copy's center, so the far one enters the
+    // window once 228 + 64·n ≥ 500, i.e. n = 5 — the sixth read. Recompute both
+    // figures if `search_margin_px` or `widen_per_miss_px` ever move.
     io.near = None;
     let acquired_on = reads_until(&mut est, &mut io, &mut clock, (450.0, 340.0), 10)
         .expect("the widening window must eventually reach the far copy");
     assert_eq!(
-        acquired_on, 5,
+        acquired_on, 6,
         "twelve reads at full ceiling must have bought nothing toward recovery: acquiring \
          on read {acquired_on} means those hits did not reset the streak"
     );
@@ -577,7 +576,9 @@ fn a_belief_replaces_the_whole_output_scan_the_budget_refuses() {
 
 /// A belief that is wrong is a cost, not a trap: while there is no fix, every
 /// miss widens the window by the same 64 px the steady state uses, so the truth
-/// is reached once `228 + 64·n` covers the 440 px from the belief to it — read 5.
+/// is reached once `228 + 64·n` covers the 500 px between the belief and the
+/// target's centers — read 6. The reach is symmetric about the belief, which is
+/// what `the_belief_window_reaches_equally_far_on_both_sides` pins.
 #[test]
 fn a_wrong_belief_costs_reads_and_then_finds_the_target() {
     let mut clock = Clock::new();
@@ -598,9 +599,51 @@ fn a_wrong_belief_costs_reads_and_then_finds_the_target() {
     }
     let on = acquired_on.expect("a wrong belief must not make the target unfindable");
     assert_eq!(
-        on, 5,
-        "read {on} rather than the 5 the widening arithmetic predicts — the cold-start \
+        on, 6,
+        "read {on} rather than the 6 the widening arithmetic predicts — the cold-start \
          window no longer widens per miss"
+    );
+}
+
+/// The belief window is a window *around the belief*, not one that starts
+/// there: `estimator` believes the target's center sits at logical (200, 150),
+/// and the cold-start reach at streak 0 is 228 px, so a target 222 px away is
+/// inside it whichever side it is on.
+///
+/// *Failure mode this closes*: `SearchRoi::center` names the middle of the
+/// region of *top-left* anchors the scan enumerates, so a center belief passed
+/// through unchanged leaves the window reaching `half + side/2` toward the
+/// bottom-right and only `half − side/2` toward the top-left. Under that
+/// geometry the two arms below are 222 px and 282 px from reach, one read apart
+/// in acquisition, and the asymmetry is invisible in anything but a test that
+/// asks both sides.
+#[test]
+fn the_belief_window_reaches_equally_far_on_both_sides() {
+    // Same offset from the belief on each side: 222 px in capture pixels,
+    // 6 px inside the window's claimed reach.
+    let mut clock_left = Clock::new();
+    let mut left = estimator(&clock_left);
+    let mut io_left =
+        FakeOutput { top_left_logical: Some((59.0, 130.0)), salt: 0, gradient: false };
+    let a = step_at(&mut left, &mut io_left, &mut clock_left, 600)
+        .expect("a target 222 px to the upper-left is inside the belief window");
+
+    let mut clock_right = Clock::new();
+    let mut right = estimator(&clock_right);
+    let mut io_right =
+        FakeOutput { top_left_logical: Some((281.0, 130.0)), salt: 0, gradient: false };
+    let b = step_at(&mut right, &mut io_right, &mut clock_right, 600)
+        .expect("a target 222 px to the lower-right is inside the belief window");
+
+    assert!(
+        (a.position.x - 89.0).abs() < 2.0 && (a.position.y - 150.0).abs() < 2.0,
+        "the upper-left arm did not land on the target: {:?}",
+        a.position
+    );
+    assert!(
+        (b.position.x - 311.0).abs() < 2.0 && (b.position.y - 150.0).abs() < 2.0,
+        "the lower-right arm did not land on the target: {:?}",
+        b.position
     );
 }
 

@@ -32,6 +32,33 @@ pub struct SearchRoi {
     pub half: f64,
 }
 
+impl SearchRoi {
+    /// A window of `half` pixels around a point the caller believes the
+    /// target's **center** sits at.
+    ///
+    /// `SearchRoi::center` names the middle of the region of *top-left* anchors
+    /// the scan enumerates (see the note in `edge_sync`, whose own verification
+    /// ROI does exactly this subtraction). Handing it a center belief unchanged
+    /// is off by half a render: the window then reaches `half + side/2` toward
+    /// the bottom-right but only `half − side/2` toward the top-left, so a
+    /// caller who pointed the belief straight at the target aims the search
+    /// past it, and a target one window-radius to the upper-left is out of
+    /// reach until the widening pays for that mistake in extra reads.
+    pub fn around_center(
+        center: (f64, f64),
+        half: f64,
+        template: &RgbaImage,
+    ) -> Self {
+        Self {
+            center: (
+                center.0 - f64::from(template.width()) / 2.0,
+                center.1 - f64::from(template.height()) / 2.0,
+            ),
+            half,
+        }
+    }
+}
+
 /// Luma variance floor, in (0–255 luma)² per sample.
 ///
 /// A window flatter than this carries no matchable structure: its NCC
@@ -1430,6 +1457,63 @@ mod tests {
                  work {:>6.2}e9  {secs:>7.3} s  -> found {}",
                 work / 1e9,
                 found.is_some(),
+            );
+        }
+    }
+
+    /// The same bill for the *other* cold start — the one that arrives with a
+    /// belief and therefore never asks for the whole output. Run with
+    /// `cargo test --release -p fidus-estimate belief_window_cost_curve -- --ignored --nocapture`.
+    ///
+    /// Two numbers travel with every request and they are not interchangeable:
+    /// the guard prices the **asked** window (`(2·half + 1)²`, before any
+    /// clamping, which is why the same geometry is refused on a big output and
+    /// allowed on a small one), while the matcher does the work of the
+    /// **clamped** one. A host that wants to predict how long its first read
+    /// takes needs the second; a host that wants to know whether the request is
+    /// refused at all needs the first.
+    #[test]
+    #[ignore = "measurement, not a gate: prints timings, so it is inherently machine-dependent"]
+    fn belief_window_cost_curve() {
+        let step = i64::from(COARSE_STEP);
+        let out = (1366_u32, 768_u32);
+        // Where `frame_sized_with_patch` draws the target: top-left at (400, 60).
+        let (px, py) = (400_f64, 60_f64);
+        println!("cap {MAX_SEARCH_POSITIONS}  step {step}  output {out:?}  belief = true center");
+        for s in [96_u32, 160, 256, 400, 634, 640] {
+            let side = f64::from(s);
+            let half = side * 1.5 + 48.0;
+            let priced = (half * 2.0).ceil() as u64 + 1;
+            let tpl = patch_template(s, s);
+            let roi = SearchRoi::around_center((px + side / 2.0, py + side / 2.0), half, &tpl);
+            // Mirrors `match_template`'s own clamp: anchors where the template
+            // still fits, so the grid counted here is the grid actually scanned.
+            let (mx, my) = (f64::from(out.0 - s), f64::from(out.1 - s));
+            let lo_x = (roi.center.0 - half).floor().clamp(0.0, mx) as i64;
+            let hi_x = (roi.center.0 + half).ceil().clamp(0.0, mx) as i64;
+            let lo_y = (roi.center.1 - half).floor().clamp(0.0, my) as i64;
+            let hi_y = (roi.center.1 + half).ceil().clamp(0.0, my) as i64;
+            let (gx, gy) = ((hi_x - lo_x) / step + 1, (hi_y - lo_y) / step + 1);
+            let work = 2.0 * (gx * gy) as f64 * f64::from(s * s) / (step * step) as f64;
+            if priced * priced > MAX_SEARCH_POSITIONS {
+                println!(
+                    "s={s:4}  half {half:>6.1}  priced {:>11}  -> REFUSED before clamping, \
+                     clamped grid would have been {gx} x {gy}",
+                    priced * priced
+                );
+                continue;
+            }
+            let frame = frame_sized_with_patch(out.0, out.1, px as u32, py as u32, s);
+            let start = std::time::Instant::now();
+            let found = match_template(&frame, &tpl, roi);
+            let secs = start.elapsed().as_secs_f64();
+            println!(
+                "s={s:4}  half {half:>6.1}  priced {:>11}  clamped grid {gx:>4} x {gy:>4}  \
+                 work {:>6.2}e9  {secs:>7.3} s  {:>4.0} Mwork/s  {:?}",
+                priced * priced,
+                work / 1e9,
+                work / 1e6 / secs,
+                found.map(|m| (m.center.x.round(), m.center.y.round())),
             );
         }
     }
