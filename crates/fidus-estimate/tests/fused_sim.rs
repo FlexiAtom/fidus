@@ -390,10 +390,12 @@ fn re_registering_the_target_flushes_the_settle_transient() {
         "the belief was supposed to be off-target before the flush, got {last}"
     );
 
+    // Deliberately *no* belief here. Since the fused cold start began reading
+    // `initial_center`, a belief pointing at 308 would rescue this read through
+    // the search window and the assertion below would pass even if the flush
+    // never happened — the whole frame has to be what finds it.
     est.register_target(
-        TargetDescription::new(gradient_template())
-            .with_initial_center(LogicalPoint::new(308.0, 150.0))
-            .tracking_ambiguous_appearance(),
+        TargetDescription::new(gradient_template()).tracking_ambiguous_appearance(),
     )
     .expect("re-registration");
     let p = step_at(&mut est, &mut io, &mut clock, 1270).expect("first fix after flush");
@@ -599,5 +601,110 @@ fn a_wrong_belief_costs_reads_and_then_finds_the_target() {
         on, 5,
         "read {on} rather than the 5 the widening arithmetic predicts — the cold-start \
          window no longer widens per miss"
+    );
+}
+
+/// Registers the same template the `estimator` helper uses, but without any
+/// belief about where it was drawn — the arm a host takes when it says nothing.
+fn beliefless_estimator(clock: &Clock) -> FusedEstimator {
+    let shared = clock.t;
+    let mut e = FusedEstimator::with_clock(Box::new(move || shared));
+    e.register_target(TargetDescription::new(template(0))).expect("valid target");
+    e
+}
+
+/// What the belief does *not* do: change the number.
+///
+/// The host-side acceptance criterion for wiring `initial_center` into the fused
+/// cold start is that the no-belief path still reads exactly what it read before,
+/// bit for bit. This fixture is where that is checkable without a desktop: the
+/// truth carries one exact copy of the template, so the narrow prior window and
+/// the whole-output window both terminate on the same match, and the two arms are
+/// compared as measurements rather than as timings.
+///
+/// *Failure mode this closes*: a wiring that let the belief reach the filter — as
+/// a pseudo-measurement, or by deciding L8's gated region — would make the
+/// believed arm's first reading differ from this one, and the difference would
+/// surface exactly here rather than in a host's error budget.
+#[test]
+fn the_beliefless_first_fix_is_bit_identical_to_the_believed_one() {
+    let mut io = FakeOutput { top_left_logical: Some((170.0, 130.0)), salt: 0, gradient: false };
+
+    let mut clock_believed = Clock::new();
+    let mut believed = estimator(&clock_believed);
+    let mut clock_plain = Clock::new();
+    let mut plain = beliefless_estimator(&clock_plain);
+
+    // Same offset from each arm's own origin, so the only difference between the
+    // two runs is whether a belief was registered.
+    let a = step_at(&mut believed, &mut io, &mut clock_believed, 600).expect("belief arm fix");
+    let b = step_at(&mut plain, &mut io, &mut clock_plain, 600).expect("no-belief arm fix");
+    assert_eq!(
+        (a.position.x, a.position.y),
+        (b.position.x, b.position.y),
+        "the belief moved the reading: believed {:?} vs beliefless {:?}",
+        a.position,
+        b.position
+    );
+    assert_eq!(
+        a.confidence.to_bits(),
+        b.confidence.to_bits(),
+        "the belief changed the confidence of an identical measurement: {} vs {}",
+        a.confidence,
+        b.confidence
+    );
+}
+
+/// The escalation order a host is promised: try the narrow window built on the
+/// belief, and if that is still throwing, re-register *without* one to get the
+/// whole output at once. Only the second rung is allowed to rescue a belief that
+/// was far off, so this test drives both rungs and a control.
+///
+/// *Failure mode this closes*: if `register_target` carried a previous belief
+/// over instead of building a fresh target, the "retry with no prior" rung would
+/// silently keep searching the old narrow window and the host's last fallback
+/// before synthetic numbers would be gone.
+#[test]
+fn a_belief_miss_then_a_beliefless_re_registration_sees_the_whole_frame() {
+    // Truth center logical (430, 320), i.e. 460 px away in x from the belief's
+    // center in capture pixels; the cold-start window is 228 px wide at streak 0
+    // and gains 64 px per both-layers miss, so read 2 is still short of it.
+    let mut io = FakeOutput { top_left_logical: Some((400.0, 300.0)), salt: 0, gradient: false };
+    let mut clock_rung2 = Clock::new();
+    let mut rung2 = estimator(&clock_rung2);
+    let mut clock_control = Clock::new();
+    let mut control = estimator(&clock_control);
+
+    let first_retry = step_at(&mut rung2, &mut io, &mut clock_rung2, 600);
+    assert!(
+        matches!(first_retry, Err(EstimateError::TargetLost)),
+        "a target 460 px from the belief must not be found by a 228 px window, got \
+         {first_retry:?}"
+    );
+    let first_control = step_at(&mut control, &mut io, &mut clock_control, 600);
+    assert!(
+        matches!(first_control, Err(EstimateError::TargetLost)),
+        "the control arm must miss the same way, got {first_control:?}"
+    );
+
+    // Rung 2: the same host, now saying nothing.
+    rung2
+        .register_target(TargetDescription::new(template(0)))
+        .expect("belief-free re-registration");
+    let p = step_at(&mut rung2, &mut io, &mut clock_rung2, 600)
+        .expect("the belief-free retry must scan the whole output and find it");
+    assert!(
+        (p.position.x - 430.0).abs() < 2.0 && (p.position.y - 320.0).abs() < 2.0,
+        "the retry landed away from the truth: {:?}",
+        p.position
+    );
+
+    // Control: the arm that kept the belief is still missing on its second read,
+    // so the retry rung is what rescued the first one — not merely elapsed reads.
+    let still = step_at(&mut control, &mut io, &mut clock_control, 600);
+    assert!(
+        matches!(still, Err(EstimateError::TargetLost)),
+        "widening reached the truth by read 2, which invalidates the arithmetic this \
+         test stands on: {still:?}"
     );
 }
