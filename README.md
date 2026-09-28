@@ -31,6 +31,36 @@ bash scripts/ci_fidus_test.sh
 并检查 `vendor/` 与 `Cargo.lock` 一起提交（或由 CI 镜像构建阶段生成）。脚本在缺少
 `.cargo/config.ci.toml` 或 `vendor/` 时拒绝运行，而不会悄悄退回 registry 缓存。
 
+## 分发渠道（唯一声明）
+
+fidus 的 Python 绑定（`crates/fidus-py`，abi3 wheel）**只声明一个官方获取方式**：本仓库
+GitHub Release 上的资产下载直链。
+
+```text
+https://github.com/FlexiAtom/fidus/releases/download/<tag>/<wheel>.whl
+```
+
+除此之外的一切——PyPI 与 test.pypi、任何包索引或镜像、以及消费方自己存进版本库的那份副本
+（vendor）——都是**二次分发**：本仓库不声明、不保证、不为其行为负责。要让打包自动化，请把
+上面这个直链当成构建输入，而不是把 wheel 提交进你的仓库。
+
+**身份来自 URL 里的 tag 加 `.sha256` 边车文件，不来自文件名。** 本项目版本号恒为
+`0.1.0.dev0`，所以同一 platform tag 下每只轮子的文件名完全相同——状态根 `withdrawn/` 里现存
+13 只已撤轮，彼此只能靠人工追加的后缀区分。由此两条推论：
+
+- 按版本解析（`--find-links` 配 `fidus==0.1.0.dev0`）**在这里不可靠**：pip 只看到一个版本，
+  挑中哪只由不得你。请钉完整 URL，取回后用 `sha256sum -c` 与边车文件对账。
+- 每只轮子必须挂在**它自己那个 commit 的 tag** 上；tag 落后于内容，URL 就在说谎。
+
+装机侧的复核是 `fidus.__git_commit__`（由 `crates/fidus-py/build.rs` 在构建时烤进二进制）。
+边车格式沿用 `scripts/build_release.sh` 已有的那条：`sha256sum` 标准输出 `<hash>  <filename>`。
+
+**平台与下限**：只出 Linux x86_64、CPython ≥ 3.10（abi3）一个产物。当前交付轮的 platform tag
+是 `manylinux_2_35`（`.so` 内最高 GLIBC 符号版本即 2.35）。实测把 `--zig` 与
+`--compatibility manylinux_2_28` 一起交给 maturin，可把下限压到 2.28（同一棵源码树，本机
+9m02s）。抬或降这个下限都会在换轮时点名告知——它改变的是"哪些机器装得上"，而消费方从包内容
+里看不见原因。
+
 ## 为什么零信任是被迫的：实机取证
 
 以下全部可在本机复现（Niri 26.04 / wayland-1 / eDP-1 1366×768）。结论先行：**在 Wayland 下，"我的窗口在屏幕哪里"这个问题在协议层面根本没有提问的入口**——不是 API 返回了错值，是压根没有这个 API。
