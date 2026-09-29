@@ -58,8 +58,9 @@ https://github.com/FlexiAtom/fidus/releases/download/<tag>/<wheel>.whl
 **平台与下限**：只出 Linux x86_64、CPython ≥ 3.10（abi3）一个产物。当前交付轮的 platform tag
 是 `manylinux_2_35`（`.so` 内最高 GLIBC 符号版本即 2.35）。实测把 `--zig` 与
 `--compatibility manylinux_2_28` 一起交给 maturin，可把下限压到 2.28（同一棵源码树，本机
-9m02s）。抬或降这个下限都会在换轮时点名告知——它改变的是"哪些机器装得上"，而消费方从包内容
-里看不见原因。
+9m02s）；**但不压**：压它翻的是轮子身份（platform tag 与 sha 全变），而 2.35 这个下限是从构建机
+长出来的，不是从需求推出来的。抬或降这个下限都会在换轮时点名告知——它改变的是"哪些机器装得上"，
+而消费方从包内容里看不见原因。
 
 ## 为什么零信任是被迫的：实机取证
 
