@@ -44,25 +44,33 @@ https://github.com/FlexiAtom/fidus/releases/download/<tag>/<wheel>.whl
 （vendor）——都是**二次分发**：本仓库不声明、不保证、不为其行为负责。要让打包自动化，请把
 上面这个直链当成构建输入，而不是把 wheel 提交进你的仓库。
 
-**身份有三处：文件名里的 local label、URL 里的 tag、`.sha256` 边车。** 版本号从 `v0.1.0-beta.2`
-起把发布 tag 名带成 PEP 440 local label（`0.1.0.dev0+v0.1.0.beta.2`），新轮子的文件名因此不再与
-历史轮同名；此前撤下的 13 只基名仍然完全相同，只能靠人工追加的后缀区分——label 就是为了不再走到
-那一步。maturin 会把 label 里的 `-` 洗成 `.`：PEP 427 不允许 local 段含 `-`，实测原样会报
-`InvalidWheelFilename: Invalid build number: beta.2`。由此三条推论：
+**身份有三处：版本号的发布段、URL 里的 tag、`.sha256` 边车。** wheel 的公开版本随发布推进——
+`crates/fidus-py/Cargo.toml` 写 `version = "0.1.0-beta.2"`，maturin 按 PEP 440 归一成 `0.1.0b2`，
+文件名即 `fidus-0.1.0b2-cp310-abi3-manylinux_2_35_x86_64.whl`。此前 13 只已撤轮基名完全相同、
+只能靠人工追加后缀区分，那个根因到此关闭。
 
-- 按版本解析仍不能替代钉 URL，但**理由变了**。`fidus==0.1.0.dev0`（不带 local）照旧匹配带 label
-  的轮子，而 PEP 440 把带 label 的排在**更高**：实测同一目录里放着旧 canonical 与新 labelled 两只，
-  不钉 label 的 pin 静默装上了新的那只。要复现就钉完整 label（`==0.1.0.dev0+v0.1.0.beta.2`，实测
-  能在一堆同基名轮子里唯一选中），或者直接钉完整 URL。
-- URL 里的 `+` 写原样或 `%2B` 都行，pip 两种都吃（实测）。
-- 每只轮子必须挂在**它自己那个 commit 的 tag** 上；tag 落后于内容，URL 就在说谎。label 与
-  `__git_commit__` 还得来自同一提交状态——`build.rs` 用的是 `git describe --always --dirty`，实测
-  版本戳改了没提交（含 `Cargo.lock` 里那条自身版本没一起提交）时，轮子会一边自称 `v0.1.0-beta.2`、
+**刻意不把身份放进 PEP 440 的 local label**（试过，被实测否决）：local 段是构建标注，不承担发布序
+——`==0.1.0.dev0` 照旧匹配 `0.1.0.dev0+任何东西`，而带 local 的版本排在**不带的更高**。实测把旧
+canonical 与带 label 的新轮放进同一目录，`fidus==0.1.0.dev0` **静默装上了新的那只**。版本该拦住的
+正是这件事，所以版本本身进。由此四条推论：
+
+- 钉版本第一次真正可用，且旧钉法会**响亮地失败**：目录里只有 `0.1.0b2` 时，`fidus==0.1.0.dev0` 报
+  `No matching distribution found (from versions: 0.1.0b2)`。精确钉法是 `fidus==0.1.0b2`，实测**不需**
+  要 `--pre`（约束里出现了预发布号即被允许）。
+- 代价说清楚：`>=0.1.0` 这类约束**会失败**——`0.1.0b2 < 0.1.0`，且 pip 默认不取预发布，实测报
+  `No matching distribution found`。要么钉 `==0.1.0b2`，要么加 `--pre`。把发布写进预发布段就要认这条。
+- 每只轮子仍必须挂在**它自己那个 commit 的 tag** 上；tag 与版本号一一对应
+  （`v0.1.0-beta.2` ↔ `0.1.0b2`），tag 落后于内容，URL 就在说谎。
+- 版本戳与 `Cargo.lock` 里那条自身版本**必须同一条提交**：`build.rs` 用 `git describe --always --dirty`
+  烤 `__git_commit__`，实测漏掉 lock 时 cargo 会在构建期重写 lock，轮子就一边自称 `0.1.0b2`、
   一边自称 `...-dirty`。
 
-装机侧的复核是 `fidus.__git_commit__`（由 `crates/fidus-py/build.rs` 在构建时烤进二进制）；带 label
-的轮子上它就等于 tag 名，应与文件名里的 label 逐字对上。
-边车格式沿用 `scripts/build_release.sh` 已有的那条：`sha256sum` 标准输出 `<hash>  <filename>`。
+装机侧的复核读两个串：`fidus.__version__` 是 cargo 原样串 `0.1.0-beta.2`，`fidus.__git_commit__`
+在干净的 tagged 树上就是 tag 名 `v0.1.0-beta.2`；文件名是 PEP 440 归一形态 `0.1.0b2`，三者对得上
+只差那一步归一。边车格式沿用 `scripts/build_release.sh` 已有的那条：`sha256sum` 标准输出
+`<hash>  <filename>`。**注意边车钉的是一次构建事件，不是这棵源码树**：maturin 往轮子里塞了带随机
+UUID 与构建 timestamp 的 CycloneDX SBOM，同一棵干净树两次构建 sha 就不同（实测 `fidus.abi3.so`、
+`METADATA`、`WHEEL` 三份载荷逐字节相同）。要按内容对账，钉 `fidus/fidus.abi3.so` 的 sha。
 
 **平台与下限**：只出 Linux x86_64、CPython ≥ 3.10（abi3）一个产物。当前交付轮的 platform tag
 是 `manylinux_2_35`（`.so` 内最高 GLIBC 符号版本即 2.35）。实测把 `--zig` 与
