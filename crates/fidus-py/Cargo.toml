@@ -1,7 +1,12 @@
 [package]
 name = "fidus-py"
 description = "Python bindings (Stage 1 vertical slice) for the fidus zero-trust positioning engine"
-version = "0.1.0-dev.0" # maturin surfaces this as PEP440 `0.1.0.dev0`
+version = "0.1.0-dev.0+v0.1.0-beta.2" # maturin -> PEP440 0.1.0.dev0+v0.1.0.beta.2
+# The local label is the release tag name, so it must be bumped in the SAME
+# commit that the tag points at: build.rs stamps `__git_commit__` from
+# `git describe --always --dirty`, so a modified-but-uncommitted label makes
+# the wheel claim `...-dirty` while its version claims a clean release.
+# maturin sanitizes `-` to `.` in the label (PEP 427 forbids `-` there).
 edition = "2024"
 rust-version = "1.86"
 license = "Apache-2.0"
