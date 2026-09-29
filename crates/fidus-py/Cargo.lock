@@ -86,7 +86,7 @@ dependencies = [
 
 [[package]]
 name = "fidus-py"
-version = "0.1.0-dev.0"
+version = "0.1.0-dev.0+v0.1.0-beta.2"
 dependencies = [
  "fidus",
  "numpy",
