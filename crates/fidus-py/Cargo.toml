@@ -1,12 +1,15 @@
 [package]
 name = "fidus-py"
 description = "Python bindings (Stage 1 vertical slice) for the fidus zero-trust positioning engine"
-version = "0.1.0-dev.0+v0.1.0-beta.2" # maturin -> PEP440 0.1.0.dev0+v0.1.0.beta.2
-# The local label is the release tag name, so it must be bumped in the SAME
-# commit that the tag points at: build.rs stamps `__git_commit__` from
-# `git describe --always --dirty`, so a modified-but-uncommitted label makes
-# the wheel claim `...-dirty` while its version claims a clean release.
-# maturin sanitizes `-` to `.` in the label (PEP 427 forbids `-` there).
+version = "0.1.0-beta.2" # maturin emits PEP 440 `0.1.0b2`; the tag `v0.1.0-beta.2` names this release
+# The public version advances per release, so wheel filenames differ across
+# releases and an exact pin resolves to one build. Identity deliberately does
+# NOT live in a PEP 440 local label: those are build annotations, `==0.1.0.dev0`
+# still matches `0.1.0.dev0+whatever`, and a labelled version sorts HIGHER than
+# the bare one -- which would turn an old unlabelled pin into a silent upgrade.
+# `Cargo.lock` repeats this version, so bump both in one commit and tag that
+# commit: build.rs stamps `__git_commit__` from `git describe --always --dirty`,
+# so a lock line left uncommitted makes the wheel claim `-dirty`.
 edition = "2024"
 rust-version = "1.86"
 license = "Apache-2.0"
