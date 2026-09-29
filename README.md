@@ -44,15 +44,24 @@ https://github.com/FlexiAtom/fidus/releases/download/<tag>/<wheel>.whl
 （vendor）——都是**二次分发**：本仓库不声明、不保证、不为其行为负责。要让打包自动化，请把
 上面这个直链当成构建输入，而不是把 wheel 提交进你的仓库。
 
-**身份来自 URL 里的 tag 加 `.sha256` 边车文件，不来自文件名。** 本项目版本号恒为
-`0.1.0.dev0`，所以同一 platform tag 下每只轮子的文件名完全相同——状态根 `withdrawn/` 里现存
-13 只已撤轮，彼此只能靠人工追加的后缀区分。由此两条推论：
+**身份有三处：文件名里的 local label、URL 里的 tag、`.sha256` 边车。** 版本号从 `v0.1.0-beta.2`
+起把发布 tag 名带成 PEP 440 local label（`0.1.0.dev0+v0.1.0.beta.2`），新轮子的文件名因此不再与
+历史轮同名；此前撤下的 13 只基名仍然完全相同，只能靠人工追加的后缀区分——label 就是为了不再走到
+那一步。maturin 会把 label 里的 `-` 洗成 `.`：PEP 427 不允许 local 段含 `-`，实测原样会报
+`InvalidWheelFilename: Invalid build number: beta.2`。由此三条推论：
 
-- 按版本解析（`--find-links` 配 `fidus==0.1.0.dev0`）**在这里不可靠**：pip 只看到一个版本，
-  挑中哪只由不得你。请钉完整 URL，取回后用 `sha256sum -c` 与边车文件对账。
-- 每只轮子必须挂在**它自己那个 commit 的 tag** 上；tag 落后于内容，URL 就在说谎。
+- 按版本解析仍不能替代钉 URL，但**理由变了**。`fidus==0.1.0.dev0`（不带 local）照旧匹配带 label
+  的轮子，而 PEP 440 把带 label 的排在**更高**：实测同一目录里放着旧 canonical 与新 labelled 两只，
+  不钉 label 的 pin 静默装上了新的那只。要复现就钉完整 label（`==0.1.0.dev0+v0.1.0.beta.2`，实测
+  能在一堆同基名轮子里唯一选中），或者直接钉完整 URL。
+- URL 里的 `+` 写原样或 `%2B` 都行，pip 两种都吃（实测）。
+- 每只轮子必须挂在**它自己那个 commit 的 tag** 上；tag 落后于内容，URL 就在说谎。label 与
+  `__git_commit__` 还得来自同一提交状态——`build.rs` 用的是 `git describe --always --dirty`，实测
+  版本戳改了没提交（含 `Cargo.lock` 里那条自身版本没一起提交）时，轮子会一边自称 `v0.1.0-beta.2`、
+  一边自称 `...-dirty`。
 
-装机侧的复核是 `fidus.__git_commit__`（由 `crates/fidus-py/build.rs` 在构建时烤进二进制）。
+装机侧的复核是 `fidus.__git_commit__`（由 `crates/fidus-py/build.rs` 在构建时烤进二进制）；带 label
+的轮子上它就等于 tag 名，应与文件名里的 label 逐字对上。
 边车格式沿用 `scripts/build_release.sh` 已有的那条：`sha256sum` 标准输出 `<hash>  <filename>`。
 
 **平台与下限**：只出 Linux x86_64、CPython ≥ 3.10（abi3）一个产物。当前交付轮的 platform tag

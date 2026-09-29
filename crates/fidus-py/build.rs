@@ -4,9 +4,10 @@
 //! Bakes the source-control identity into the extension so a consumer can
 //! bind an installed `.so` to the exact `fidus` checkout it came from.
 //!
-//! The wheel `__version__` is a static `0.1.0-dev.0` and carries no commit,
-//! so without this the only anchor a downstream project has is the artifact's
-//! own sha256 (plan `meapet-embed-contract`, finished receipt §8-B). `git
+//! The wheel `__version__` carries the release tag name as a PEP 440 local
+//! label, but that label is a claim typed into the manifest; this stamp is the
+//! measured source state, and it is what pins a build made between tags to a
+//! commit (plan `meapet-embed-contract`, finished receipt §8-B). `git
 //! describe --always --dirty` yields `v0.1.0-beta.1-36-g<sha>` at a clean HEAD
 //! and appends `-dirty` when the tree has uncommitted changes — so the baked
 //! string never over-claims the source state it was built from. Falls back to
