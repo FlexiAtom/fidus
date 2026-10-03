@@ -1,0 +1,24 @@
+[package]
+name = "fidus-backend-windows"
+description = "fidus backend: layered-window marker projection + GDI BitBlt capture on Windows (basic Win32 primitives only)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+fidus-core = { workspace = true }
+thiserror = { workspace = true }
+
+# Declared per-target so a Linux host never compiles the Win32 bindings; the
+# crate's platform-neutral half (api/plan/projector) still builds and is tested
+# everywhere, including the Linux CI gate.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_HiDpi",
+    "Win32_UI_WindowsAndMessaging",
+] }

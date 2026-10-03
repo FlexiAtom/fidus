@@ -29,6 +29,9 @@ pub enum CompositorKind {
     /// A plain X11 display server (or an XWayland screen). The L0 Anchor
     /// calibrator's territory.
     X11,
+    /// The Windows desktop (DWM). No layer shell, so L9 is unavailable there;
+    /// L0 Anchor qualifies on capability.
+    Windows,
     /// Something else; free-form identifier.
     Other(String),
     /// Could not be determined.
@@ -60,6 +63,7 @@ impl CompositorKind {
                 "labwc" => return CompositorKind::Labwc,
                 "wayfire" => return CompositorKind::Wayfire,
                 "x11" | "xorg" => return CompositorKind::X11,
+                "windows" | "win32" | "win" => return CompositorKind::Windows,
                 _ => {}
             }
         }

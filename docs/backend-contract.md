@@ -93,5 +93,12 @@
 |---|---|---|
 | `fidus-backend-wayland-layer` | 单 layer surface + `anchor=TOP\|LEFT` + margin | ❌ 单 surface |
 | `fidus-backend-x11` | 每标记一个 override-redirect 窗口 | ✅ |
+| `fidus-backend-windows` | 每标记一个**分层**窗口（`WS_EX_LAYERED` + `UpdateLayeredWindow`），`BitBlt(GetDC(NULL))` 截工作区 | ✅ |
 
 X11 后端的 override-redirect 窗口是 fidus **自己**创建、放在**自己**选的坐标上的——与 layer-shell 的 margin 同一性质：**我们告诉系统标记在哪，而不是问系统标记在哪。** 这就是零信任在后端层的全部含义。
+
+### Windows 后端的三条实测结论（移植其它平台时同样适用）
+
+* **"已显示"必须显式同步**：不加同步时纯 `SRCCOPY` 截屏只看到 8/20 个刚投射的标记——这是 contract §2.2 最容易错的那条在 Windows 上的形态。`DwmFlush()`（Wayland frame callback 的等价物）或 `CAPTUREBLT` 都能修正它。
+* **"不截获鼠标"不能只靠 `WS_EX_TRANSPARENT`**：非分层窗口即使带它，`WindowFromPoint` 仍命中 4/4；**分层 + `WS_EX_TRANSPARENT`** 为 0/4。另外 `DefWindowProc` 在两种设计下都回答 `HTCLIENT`，所以穿透发生在命中测试选择阶段，而不是 `WM_NCHITTEST` 的返回值——实现不要依赖后者。
+* 可自动化的清单项（落点/颜色/面积、清除可见性、穿透、残留窗口、真实 L0 残差）由 `cargo run --release --no-default-features --features windows -p fidus --bin fidus-windows-probe` 逐条打印；数据见 [`measurements/windows-backend-primitives.md`](measurements/windows-backend-primitives.md)。

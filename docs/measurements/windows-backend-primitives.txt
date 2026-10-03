@@ -1,0 +1,94 @@
+== environment ==
+dpi_awareness = PerMonitorV2
+dpi_for_system = 96
+screen = 1920x1080  monitors = 1
+virtual_screen = 1920x1080 at (0, 0)
+work_area = 1920x1032 at (0, 0)
+dwm_composition = hr=0x00000000 enabled=1
+capture_sanity = 1920x1032 52.7223ms nonblack=99.81% distinct=718 changed_over_250ms=0 magenta_px=0
+
+== visibility probe (one 32px marker at a fixed spot) ==
+design=gdi IsWindowVisible=1 self_dc_pixel=0xff00ff | srccopy=px1024 bbox=(200,200)-(231,231) expected=(200,200) ok=1 | srccopy|captureblt=px1024 bbox=(200,200)-(231,231) expected=(200,200) ok=1 | printwindow=px0 bbox=none ok=0
+design=layered IsWindowVisible=1 self_dc_pixel=0xffffffff | srccopy=px1024 bbox=(200,200)-(231,231) expected=(200,200) ok=1 | srccopy|captureblt=px1024 bbox=(200,200)-(231,231) expected=(200,200) ok=1 | printwindow=px0 bbox=none ok=0
+
+== design matrix (single marker, baseline->show->capture->clear) ==
+design=gdi dwmflush=false cap=srccopy: trials=20 found=8 (40%) centroid_exact=8 (40%) color_exact=8 (40%) area_ok=8 clear_clean=8/8 residual_max=0.000px residual_mean=0.000px marker_px=3392 changed_px=3492
+design=gdi dwmflush=false cap=srccopy: error trial0 detect: no changed pixels found
+design=gdi dwmflush=false cap=srccopy: error trial1 srccopy bbox=(1205,634)-(1232,661) expected_topleft=(1205,634)
+design=gdi dwmflush=false cap=srccopy|captureblt: trials=20 found=20 (100%) centroid_exact=20 (100%) color_exact=20 (100%) area_ok=20 clear_clean=20/20 residual_max=0.000px residual_mean=0.000px marker_px=8480 changed_px=8620
+design=gdi dwmflush=false cap=srccopy|captureblt: error trial0 srccopy|captureblt bbox=(1736,123)-(1743,130) expected_topleft=(1736,123)
+design=gdi dwmflush=false cap=srccopy|captureblt: error trial1 srccopy|captureblt bbox=(1205,634)-(1232,661) expected_topleft=(1205,634)
+design=gdi dwmflush=false cap=printwindow: trials=20 found=0 (0%) centroid_exact=0 (0%) color_exact=0 (0%) area_ok=0 clear_clean=0/0 residual_max=0.000px residual_mean=0.000px marker_px=0 changed_px=39535140
+design=gdi dwmflush=false cap=printwindow: error trial0 detect: no changed pixels found
+design=gdi dwmflush=false cap=printwindow: error trial1 detect: no changed pixels found
+design=gdi dwmflush=false residual_windows_after_drop=false
+design=gdi dwmflush=true cap=srccopy: trials=20 found=20 (100%) centroid_exact=20 (100%) color_exact=20 (100%) area_ok=20 clear_clean=20/20 residual_max=0.000px residual_mean=0.000px marker_px=8480 changed_px=8520
+design=gdi dwmflush=true cap=srccopy: error trial0 srccopy bbox=(913,802)-(920,809) expected_topleft=(913,802)
+design=gdi dwmflush=true cap=srccopy: error trial1 srccopy bbox=(1530,326)-(1557,353) expected_topleft=(1530,326)
+design=gdi dwmflush=true cap=srccopy|captureblt: trials=20 found=20 (100%) centroid_exact=20 (100%) color_exact=20 (100%) area_ok=20 clear_clean=20/20 residual_max=0.000px residual_mean=0.000px marker_px=8480 changed_px=8540
+design=gdi dwmflush=true cap=srccopy|captureblt: error trial0 srccopy|captureblt bbox=(913,802)-(920,809) expected_topleft=(913,802)
+design=gdi dwmflush=true cap=srccopy|captureblt: error trial1 srccopy|captureblt bbox=(1530,326)-(1557,353) expected_topleft=(1530,326)
+design=gdi dwmflush=true cap=printwindow: trials=20 found=0 (0%) centroid_exact=0 (0%) color_exact=0 (0%) area_ok=0 clear_clean=0/0 residual_max=0.000px residual_mean=0.000px marker_px=0 changed_px=39535160
+design=gdi dwmflush=true cap=printwindow: error trial0 detect: no changed pixels found
+design=gdi dwmflush=true cap=printwindow: error trial1 detect: no changed pixels found
+design=gdi dwmflush=true residual_windows_after_drop=false
+design=layered dwmflush=false cap=srccopy: trials=20 found=20 (100%) centroid_exact=20 (100%) color_exact=20 (100%) area_ok=20 clear_clean=20/20 residual_max=0.000px residual_mean=0.000px marker_px=8480 changed_px=8540
+design=layered dwmflush=false cap=srccopy: error trial0 srccopy bbox=(1675,741)-(1682,748) expected_topleft=(1675,741)
+design=layered dwmflush=false cap=srccopy: error trial1 srccopy bbox=(1349,470)-(1376,497) expected_topleft=(1349,470)
+design=layered dwmflush=false cap=srccopy|captureblt: trials=20 found=20 (100%) centroid_exact=20 (100%) color_exact=20 (100%) area_ok=20 clear_clean=20/20 residual_max=0.000px residual_mean=0.000px marker_px=8480 changed_px=8540
+design=layered dwmflush=false cap=srccopy|captureblt: error trial0 srccopy|captureblt bbox=(1675,741)-(1682,748) expected_topleft=(1675,741)
+design=layered dwmflush=false cap=srccopy|captureblt: error trial1 srccopy|captureblt bbox=(1349,470)-(1376,497) expected_topleft=(1349,470)
+design=layered dwmflush=false cap=printwindow: trials=20 found=0 (0%) centroid_exact=0 (0%) color_exact=0 (0%) area_ok=0 clear_clean=0/0 residual_max=0.000px residual_mean=0.000px marker_px=0 changed_px=39535200
+design=layered dwmflush=false cap=printwindow: error trial0 detect: no changed pixels found
+design=layered dwmflush=false cap=printwindow: error trial1 detect: no changed pixels found
+design=layered dwmflush=false residual_windows_after_drop=false
+design=layered dwmflush=true cap=srccopy: trials=20 found=20 (100%) centroid_exact=20 (100%) color_exact=20 (100%) area_ok=20 clear_clean=20/20 residual_max=0.000px residual_mean=0.000px marker_px=8480 changed_px=8540
+design=layered dwmflush=true cap=srccopy: error trial0 srccopy bbox=(1122,648)-(1129,655) expected_topleft=(1122,648)
+design=layered dwmflush=true cap=srccopy: error trial1 srccopy bbox=(1469,132)-(1496,159) expected_topleft=(1469,132)
+design=layered dwmflush=true cap=srccopy|captureblt: trials=20 found=20 (100%) centroid_exact=20 (100%) color_exact=20 (100%) area_ok=20 clear_clean=20/20 residual_max=0.000px residual_mean=0.000px marker_px=8480 changed_px=8580
+design=layered dwmflush=true cap=srccopy|captureblt: error trial0 srccopy|captureblt bbox=(1122,648)-(1129,655) expected_topleft=(1122,648)
+design=layered dwmflush=true cap=srccopy|captureblt: error trial1 srccopy|captureblt bbox=(1469,132)-(1496,159) expected_topleft=(1469,132)
+design=layered dwmflush=true cap=printwindow: trials=20 found=0 (0%) centroid_exact=0 (0%) color_exact=0 (0%) area_ok=0 clear_clean=0/0 residual_max=0.000px residual_mean=0.000px marker_px=0 changed_px=39535160
+design=layered dwmflush=true cap=printwindow: error trial0 detect: no changed pixels found
+design=layered dwmflush=true cap=printwindow: error trial1 detect: no changed pixels found
+design=layered dwmflush=true residual_windows_after_drop=false
+
+== click-through / focus (four simultaneous sentinels, topmost) ==
+design=gdi single_marker_intercepted=true nchittest=1 ht_transparent=false foreground_stable=true
+design=gdi four_marker_intercepted=4/4 ht_transparent=0/4 foreground_stable=true
+design=gdi residual_windows_after_clear=false
+design=layered single_marker_intercepted=false nchittest=1 ht_transparent=false foreground_stable=true
+design=layered four_marker_intercepted=0/4 ht_transparent=0/4 foreground_stable=true
+design=layered residual_windows_after_clear=false
+
+== L0 Anchor end-to-end through real fidus-core traits ==
+design=gdi anchor_result = OK (cap=srccopy|captureblt)
+design=gdi anchor_map_scale = 1.000000
+design=gdi anchor_map_coefficients = [1.0, 0.0, 0.0, 3.238906767626359e-17, 1.0, -9.169836056221627e-14]
+design=gdi anchor_rms_residual_px = 0.000
+design=gdi anchor_max_residual_px = 0.000
+design=gdi anchor_verification_max_err_px = 0.000
+design=gdi anchor_consistency_max_err_px = 0.000
+design=gdi anchor_sample_count = 4
+design=gdi anchor_passes = 2
+design=gdi anchor_capture_size = (1920, 1032)
+design=gdi anchor_captures = 8
+design=gdi anchor_capture_ms = min 26.82 median 33.86 max 38.55
+design=gdi anchor_wall_ms = 541
+design=gdi anchor_residual_windows_after_teardown=false
+design=layered anchor_result = OK (cap=srccopy|captureblt)
+design=layered anchor_map_scale = 1.000000
+design=layered anchor_map_coefficients = [1.0, 0.0, 0.0, 3.238906767626359e-17, 1.0, -9.169836056221627e-14]
+design=layered anchor_rms_residual_px = 0.000
+design=layered anchor_max_residual_px = 0.000
+design=layered anchor_verification_max_err_px = 0.000
+design=layered anchor_consistency_max_err_px = 0.000
+design=layered anchor_sample_count = 4
+design=layered anchor_passes = 2
+design=layered anchor_capture_size = (1920, 1032)
+design=layered anchor_captures = 8
+design=layered anchor_capture_ms = min 24.01 median 32.94 max 37.00
+design=layered anchor_wall_ms = 499
+design=layered anchor_residual_windows_after_teardown=false
+
+capture_timing_all = n=408 min 4.28ms median 30.80ms max 52.72ms

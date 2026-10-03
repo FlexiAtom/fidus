@@ -39,6 +39,7 @@ name = "fidus"
 version = "0.1.0-beta.1"
 dependencies = [
  "fidus-backend-wayland-layer",
+ "fidus-backend-windows",
  "fidus-backend-x11",
  "fidus-calibrate",
  "fidus-core",
@@ -55,6 +56,15 @@ dependencies = [
  "wayland-backend",
  "wayland-client",
  "wayland-protocols-wlr",
+]
+
+[[package]]
+name = "fidus-backend-windows"
+version = "0.1.0-beta.1"
+dependencies = [
+ "fidus-core",
+ "thiserror",
+ "windows-sys",
 ]
 
 [[package]]

@@ -34,6 +34,7 @@
 | [P5 · output mutation/recovery](P5-output-mutation-recovery.md) | ✅ **已转方案，最小 runner 已实现** | `scripts/output_mutation_runner.sh` 仅供显式 `--allow-output-mutation` 手工调用；fake Niri 回归见 `scripts/test_output_mutation_runner.sh`；真实 Niri 异常路径和跨 compositor 身份证明仍未完成。 |
 | [P5 · 人工 output 恢复](P5-manual-output-recovery.md) | ✅ **自审通过，已转方案并实现** | `scripts/manual_restore_output.sh` 仅供显式人工调用；不提供自动 watcher，不改变 `recovery=unverified`，fake 回归见 `scripts/test_manual_restore_output.sh`。 |
 | [核心边界修复后续](core-hardening-followup.md) | ⚠️ **R1–R4 已获批准并部分实现；全量复审发现仍有开放风险** | 只处理 Engine Gate、坏 Frame、Wayland 生命周期和公开输入边界；真实桌面、跨机器、发布和 push 明确排除。 |
+| [Windows 后端](windows-backend.md) | ✅ **已实现并实机验证；待人工审查合并** | 分层窗口 + `BitBlt` + `DwmFlush`：落点/颜色/面积 20/20、rms/verify/consistency 全 **0.000 px**、真实 L0 解出单位仿射、穿透 0/4、无残留窗口。`PrintWindow` 与非分层窗口两个方向被实测**否决**。未测：非 100% 缩放、真实鼠标点击、多显示器；本机未跑 clippy 与 Linux 门禁（代理掉线，已记录）。 |
 
 ## 实测记录
 
@@ -42,3 +43,4 @@
 | 记录 | 结论 |
 |---|---|
 | [L9 分数缩放与旋转精度](../measurements/l9-fractional-scaling.md) | 旋转零误差；**整数缩放完美、分数缩放系统性退化**，成因是逻辑→物理取整 |
+| [Windows 投射与截屏原语](../measurements/windows-backend-primitives.md) | 分层窗口 + `BitBlt(SRCCOPY\|CAPTUREBLT)` + `DwmFlush` 得 **0.000 px** 残差与真实 Anchor 单位仿射；非分层窗口不满足鼠标穿透，`PrintWindow` 截不出内容（均实测否决） |

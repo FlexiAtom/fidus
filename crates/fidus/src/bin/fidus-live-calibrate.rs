@@ -57,6 +57,7 @@ fn choice_name(choice: BackendChoice) -> &'static str {
         BackendChoice::Auto => "auto",
         BackendChoice::WaylandLayer => "wayland",
         BackendChoice::X11 => "x11",
+        BackendChoice::Windows => "windows",
     }
 }
 
@@ -79,6 +80,7 @@ fn compositor_token(kind: &fidus_core::env::CompositorKind) -> &'static str {
         fidus_core::env::CompositorKind::Labwc => "labwc",
         fidus_core::env::CompositorKind::Wayfire => "wayfire",
         fidus_core::env::CompositorKind::X11 => "x11",
+        fidus_core::env::CompositorKind::Windows => "windows",
         fidus_core::env::CompositorKind::Other(_) => "other",
         fidus_core::env::CompositorKind::Unknown => "unknown",
     }
@@ -93,6 +95,7 @@ fn main() {
     let choice = match std::env::var("FIDUS_BACKEND").as_deref() {
         Ok("wayland") | Ok("wayland-layer") => BackendChoice::WaylandLayer,
         Ok("x11") => BackendChoice::X11,
+        Ok("windows") => BackendChoice::Windows,
         _ => BackendChoice::Auto,
     };
     let mut builder = FidusBuilder::new();
