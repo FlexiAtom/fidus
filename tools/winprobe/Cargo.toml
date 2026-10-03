@@ -1,0 +1,24 @@
+[package]
+name = "winprobe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Detached from the fidus workspace on purpose: this is a measurement harness
+# for the Windows-backend proposal, not a workspace member yet.
+[workspace]
+
+[dependencies]
+fidus-core = { path = "../../crates/fidus-core" }
+fidus-calibrate = { path = "../../crates/fidus-calibrate" }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm",
+    "Win32_Storage_Xps",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_HiDpi",
+    "Win32_UI_WindowsAndMessaging",
+] }
