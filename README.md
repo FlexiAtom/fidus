@@ -197,7 +197,7 @@ $ FIDUS_BACKEND=x11 cargo run -p fidus --bin fidus-live-calibrate
 | **P4** | `fidus-test` 跨环境测试子项目：ci / live-host / live-container | ✅ 本机实现与候选归档已完成；当前正式发布未收口，跨机器验证挂起 |
 | **P5** | 宿主 output mutation/recovery：显式授权、快照、read-back、恢复和 PGID 监督 | ⚠️ 最小 runner 与无显示回归已完成；真实桌面错误处理单点验证已冻结（约等于挂起），意外恢复不可靠，NameOnly 不得 confirmed |
 
-当前可在 Niri / Sway / Hyprland / KDE Plasma 等支持 `zwlr_layer_shell_v1` + `zwlr_screencopy_manager_v1` 的 Wayland 合成器上以 L9 校准，在真 X server 上以 L0 校准（后端由 `FidusBuilder` 自动选择：layer-shell 优先，其次 X11），并可注册调用方自己的渲染模板做稳态追踪：L1 模板匹配 + L8 门控差分融合进常速度 Kalman 跟踪器（L7，P2-c）——拖拽跟随、动画期滑行（置信度 0 的标注信念而非伪造测量）、丢失后重捕获。Windows、macOS、GNOME（portal 路径）的 backend 尚未实现。
+当前可在 Niri / Sway / Hyprland / KDE Plasma 等支持 `zwlr_layer_shell_v1` + `zwlr_screencopy_manager_v1` 的 Wayland 合成器上以 L9 校准，在真 X server 上以 L0 校准（后端由 `FidusBuilder` 自动选择：layer-shell 优先，其次 X11），在 Windows 上以 L0 校准（分层窗口投影 + `BitBlt` 截屏，见[后端实测记录](./docs/measurements/windows-backend-primitives.md)），并可注册调用方自己的渲染模板做稳态追踪：L1 模板匹配 + L8 门控差分融合进常速度 Kalman 跟踪器（L7，P2-c）——拖拽跟随、动画期滑行（置信度 0 的标注信念而非伪造测量）、丢失后重捕获。macOS、GNOME（portal 路径）的 backend 尚未实现。
 
 > **fidus 是全平台定位库，不是 Wayland 专用工具，也不是谁的"兜底方案"。**
 >
@@ -236,9 +236,10 @@ crates/
 │                                  engine.rs     Calibrator/Estimator trait + FidusEngine
 ├── fidus-backend-wayland-layer/ 仅适配基础原语：layer-shell 投影 + wlr-screencopy 截屏
 ├── fidus-backend-x11/           仅适配基础原语：override-redirect 窗口投影（每标记一窗）+ GetImage(root) 截屏
+├── fidus-backend-windows/       仅适配基础原语：分层窗口投影（每标记一窗，`UpdateLayeredWindow`）+ `BitBlt` 工作区截屏
 ├── fidus-calibrate/             L9 Crosshair + L0 Anchor 校准器；共享 detect.rs 差分检测器
 ├── fidus-estimate/              C 层估计器：L1 Fingerprint + L8 EdgeSync/MotionGate + L4/L7 融合（常速度 KF）+ ScreenClassifier
-└── fidus/                       伞 crate：FidusBuilder 后端选择（Auto/WaylandLayer/X11）+ 冒烟测试二进制
+└── fidus/                       伞 crate：FidusBuilder 后端选择（Auto/WaylandLayer/X11/Windows）+ 冒烟测试二进制
 ```
 
 `fidus-backend-*` 只适配"画标记、截屏幕"的原语，**永不**绑定任何报告窗口几何的协议——这是零信任在 backend 层的落地。X11 backend 的 override-redirect 窗口是 fidus **自己**创建、放在**自己**选的坐标上的，与 layer-shell margin 同一性质。
@@ -272,6 +273,13 @@ FIDUS_BACKEND=x11 FIDUS_METHOD=anchor cargo run --release -p fidus --bin fidus-l
 ```
 
 四个阶段分别验证：后端连接 + 环境探测 → 所有方法的 Gate 回答 → 完整校准 → teardown（`niri msg layers | grep fidus` / `xwininfo -root -tree` 应无 fidus 窗口）。
+
+Windows 上换成常驻诊断（它驱动**已发货的后端**，逐条打印 `backend-contract.md` §4 清单中机器能自答的部分：落点质心/颜色/面积、清除可见性、点击穿透、残留窗口、真实 L0 残差与 gate 回答）：
+
+```bash
+# wayland-sys 不能在 Windows 上编译，所以 Windows 侧显式 opt-in
+cargo run --release --no-default-features --features windows -p fidus --bin fidus-windows-probe
+```
 
 作为库使用：
 
@@ -332,7 +340,9 @@ bash scripts/ci_fidus_test.sh
 - **单输出**：多显示器时 Gate 返回 `Degraded`，只校准第一个输出（§10.4 未定案前的诚实降级）。
 - 动态壁纸探测（P2-e 已落地）：`FidusBuilder::build` 默认跑一次 `ScreenClassifier`（3 对相隔 200ms 的截屏、中心 84% 区域、步长 4 采样，取**最差**一对；> 15% 判动态）自动填充 `is_dynamic_wallpaper`，调用方显式提供时跳过；Gate 据此把 L9 降为 `Degraded{0.85}`（差分检测对动态背景鲁棒，代价是重试更多而非精度更低）、L0 降为 `Degraded{0.6}`。实机读数：静态桌面 ~0.0001–0.0005，全屏动画 0.22–0.29，局部动画 0.08–0.17（正是"取最差一对"的理由）。它分不清"壁纸在动"和"窗口里在播视频"——但 Gate 问的是"基线与捕获之间背景会不会变"，两者答案相同，所以不区分。
 - **L0 在 rootless XWayland 上不可用**（取证五：`GetImage(root)` → `BadMatch`，连接时即诚实拒绝）。
-- **Windows / macOS 后端未实现**：这是**缺 backend，不是缺设计**。L0 Anchor 校准器、Gate 的能力判定、整条 C 层估计管线都与平台无关，需要的只是各约 300 行的"投射 + 截屏"原语适配（Windows: 分层窗口 + BitBlt；macOS: `NSPanel` + `CGWindowListCreateImage`，另需屏幕录制权限状态机 —— `PermissionState` 已预留 `RequiresRestart`，因为 macOS 授权后进程必须重启）。
+- **Windows 后端已实现，但只在本机 100% 缩放下实测**：分层窗口（`WS_EX_LAYERED` + `UpdateLayeredWindow`）+ `BitBlt(GetDC(NULL))` + `DwmFlush`，每标记一窗，因此提供**多标记投射**、走 L0 Anchor；L9 需要 layer shell，Windows 上诚实不可用（Gate 答 `MissingProtocol`）。实测：落点质心/颜色/面积 **20/20**，rms/verify/consistency **全 0.000 px**，解出**单位仿射**，标记 `WindowFromPoint` 命中 **0/4**（不截获鼠标），teardown 后残留窗口 **0**（[实测记录](./docs/measurements/windows-backend-primitives.md) + [常驻探针输出](./docs/measurements/windows-backend-live-probe.txt)）。**未实测**：非 100% 缩放（本机 DPI 96、单输出）、真实鼠标点击穿透（只有 `WindowFromPoint` 代理证据）、多显示器/混合 DPI、运行中 DPI 变更、HDR、独占全屏/UAC 安全桌面/远程会话。Windows 侧构建需 `--no-default-features --features windows`（`wayland-sys` 在 Windows 上无法编译，而 Cargo 无法表达"只在某平台默认启用该 feature"）。
+- **Windows 逐次截屏分配缓冲**：实测 1920×1032 中位 **32.5–42.0 ms**（两次运行各 n=40，min 22.1 ms；波动来自桌面自身活动），每次分配一张 8 MB DIB。估计器按 ~500 ms 节奏取帧，占比约 6–8%，因此**未**实现缓冲复用——代价是每次多一次分配，收益是少一份会残留陈旧像素的状态。
+- **macOS 后端未实现**：这是**缺 backend，不是缺设计**（`NSPanel` + `CGWindowListCreateImage`，另需屏幕录制权限状态机 —— `PermissionState` 已预留 `RequiresRestart`，因为 macOS 授权后进程必须重启）。
 - **分数缩放（1.25×/1.5×/1.75×）**：残差从 0.000px 升到最高 0.308px，成因是逻辑→物理的取整（[实测记录](./docs/measurements/l9-fractional-scaling.md)）。对整数逻辑像素摆放而言，约 0.2px 的量化误差通常不改变 `round()` 结果；但这不是“无害”保证：实测 consistency 最差 1.114px、约 30 次校准出现 2 次 `AreaMismatch`，可用性会下降，失败时必须诚实拒绝。**整数缩放与任意旋转均为 0.000px。**
 - **L10 GradientField**：**已否决**——提案阶段实测表明「对数螺旋 + 锁定主频」自相矛盾，且相位法无法独立消歧（见 [spec §4.2](./docs/spec.md)）。Gate 诚实返回 `FeatureDisabled`。
 - **可定位性检查是固定半径采样**（2/4/8/16px）：周期恰好落在采样半径之间的图案（如在 6px 自相似但 4px/8px 不）可能漏过。这被**容纳**而非致命——此类模板在真实位置仍有正确的峰，歧义只存在于固定偏移的等优候选之间，L7 的运动模型会把由此产生的跳变判为与轨迹不符。必须拦的渐变与近匀色**在所有半径上都歧义**，不可能漏过。

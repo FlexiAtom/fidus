@@ -16,7 +16,7 @@ use fidus_estimate::{FusedEstimator, ScreenClassifier};
 pub enum BackendChoice {
     /// Try the compiled-in backends in preference order and keep the first
     /// whose primitives are all available: layer-shell first (its
-    /// calibrator is the flagship), then X11.
+    /// calibrator is the flagship), then X11, then Windows.
     #[default]
     Auto,
     /// Layer-shell backend (Niri / Sway / Hyprland / KDE / partial GNOME).
@@ -24,6 +24,10 @@ pub enum BackendChoice {
     /// X11 backend (real X servers; XWayland only when its root is
     /// capturable).
     X11,
+    /// Windows backend (layered-window projection + `BitBlt` capture). Needs
+    /// the `windows` feature on a Windows host; L0 Anchor is the calibrator,
+    /// because Windows has no layer shell.
+    Windows,
 }
 
 /// Builder for a [`FidusEngine`], with caller-supplied environment
@@ -108,6 +112,7 @@ impl FidusBuilder {
             BackendChoice::Auto => self.build_auto(),
             BackendChoice::WaylandLayer => self.build_wayland_layer(),
             BackendChoice::X11 => self.build_x11(),
+            BackendChoice::Windows => self.build_windows(),
         }
     }
 
@@ -123,8 +128,17 @@ impl FidusBuilder {
             Ok(backend) => return self.assemble(backend),
             Err(e) => failures.push(format!("x11: {e}")),
         }
+        #[cfg(all(feature = "windows", windows))]
+        match Self::connect_windows() {
+            Ok(backend) => return self.assemble(backend),
+            Err(e) => failures.push(format!("windows: {e}")),
+        }
         if failures.is_empty() {
-            failures.push("no backend compiled in (enable `wayland-layer` and/or `x11`)".into());
+            failures.push(
+                "no backend compiled in for this platform \
+                 (Linux: `wayland-layer` and/or `x11`; Windows: `--no-default-features --features windows`)"
+                    .into(),
+            );
         }
         Err(InitError::ProbeFailed(failures.join("; ")))
     }
@@ -149,6 +163,26 @@ impl FidusBuilder {
         Err(InitError::ProbeFailed("compiled without the `x11` feature".into()))
     }
 
+    fn build_windows(self) -> Result<FidusEngine, InitError> {
+        #[cfg(all(feature = "windows", windows))]
+        {
+            let backend = Self::connect_windows()?;
+            self.assemble(backend)
+        }
+        // Both halves are required: the Windows backend only exists on a
+        // Windows host, and `wayland-sys` does not compile there, so a Windows
+        // build opts in explicitly.
+        #[cfg(not(all(feature = "windows", windows)))]
+        {
+            let _ = self;
+            Err(InitError::ProbeFailed(
+                "the `windows` backend needs the `windows` feature on a Windows host \
+                 (build with `--no-default-features --features windows`)"
+                    .into(),
+            ))
+        }
+    }
+
     #[cfg(feature = "wayland-layer")]
     fn connect_wayland_layer() -> Result<ProbedBackend, InitError> {
         let mut backend = fidus_backend_wayland_layer::WaylandLayerBackend::connect()?;
@@ -168,6 +202,21 @@ impl FidusBuilder {
             return Err(InitError::ProbeFailed(match backend.capture_probe_error() {
                 Some(e) => format!("root window is not capturable (rootless XWayland?): {e}"),
                 None => "X screen lacks a usable visual".into(),
+            }));
+        }
+        let env = backend.probe_environment();
+        Ok(ProbedBackend { env, io_factory: Box::new(backend) })
+    }
+
+    #[cfg(all(feature = "windows", windows))]
+    fn connect_windows() -> Result<ProbedBackend, InitError> {
+        let backend = fidus_backend_windows::WindowsBackend::connect()?;
+        if !backend.primitives_available() {
+            return Err(InitError::ProbeFailed(match backend.capture_probe_error() {
+                Some(e) => format!(
+                    "the screen is not capturable (no interactive desktop, secure desktop, or capture blocked): {e}"
+                ),
+                None => "the primary work area is empty".into(),
             }));
         }
         let env = backend.probe_environment();

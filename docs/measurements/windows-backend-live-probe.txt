@@ -1,0 +1,32 @@
+== fidus Windows backend probe ==
+dpi_awareness = PerMonitorV2 (physical=true)
+monitors = 1
+work_area = 1920x1032 at (0, 0)
+capture_probe = ok
+environment = layer_shell:false multi_marker:true capture:Granted compositor:Windows
+capture = 1920x1032 stride=7680 format=Xrgb8888 nonblack=100.00% changed_over_250ms=67
+
+== projection (baseline -> show -> capture -> clear -> capture) ==
+projection: trials=20 found=20 centroid_exact=20 colour_exact=20 area_exact=20 clear_clean=20/20 residual_max=0.000px residual_mean=0.000px
+
+== input ==
+four_sentinels=4 intercepted_by_marker=0/4 live_marker_windows=4
+after_teardown_live_marker_windows = 0
+
+== assembled engine (builder -> gate -> L0 Anchor) ==
+engine_environment = layer_shell:false multi_marker:true monitors:1 composite:Windows
+gate_Crosshair = NotSupported { method: Crosshair, reason: MissingProtocol { protocol: "zwlr_layer_shell_v1" } }
+gate_Anchor = Available { method: Anchor }
+calibrate = OK method Anchor
+calibrate_map_scale = 1.000000
+calibrate_map_coefficients = [0.9999999999999999, -2.487498729836694e-16, 3.6416292843020734e-13, 0.0, 1.0, 0.0]
+calibrate_rms_residual_px = 0.000
+calibrate_max_residual_px = 0.000
+calibrate_verification_max_err_px = 0.000
+calibrate_consistency_max_err_px = 0.000
+calibrate_sample_count = 4
+calibrate_capture_size = (1920, 1032)
+calibrate_wall_ms = 1461
+estimate = no tracking target has been registered (expected without a registered target)
+final_live_marker_windows = 0 (must be 0: no residual overlay)
+capture_timing = n=40 min 25.04ms median 41.96ms max 53.82ms

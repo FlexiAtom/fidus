@@ -7,15 +7,25 @@ rust-version.workspace = true
 license.workspace = true
 
 [features]
+# Linux host defaults. Windows is opt-in: `wayland-sys` does not compile there
+# (measured: `use std::os::unix::io::RawFd`), and Cargo cannot express "enable
+# this default only on that platform". Windows hosts therefore build with
+# `--no-default-features --features windows`.
 default = ["wayland-layer", "x11"]
 # Adapts bare wl_surface/layer-shell projection + wlr-screencopy capture.
 wayland-layer = ["dep:fidus-backend-wayland-layer"]
 # Adapts override-redirect window projection + GetImage(root) capture.
 x11 = ["dep:fidus-backend-x11"]
+# Adapts layered-window projection + BitBlt capture on Windows.
+windows = ["dep:fidus-backend-windows"]
 
 [[bin]]
 name = "fidus-probe-marker"
 required-features = ["wayland-layer"]
+
+[[bin]]
+name = "fidus-windows-probe"
+required-features = ["windows"]
 
 [dependencies]
 fidus-core = { workspace = true }
@@ -23,3 +33,4 @@ fidus-calibrate = { workspace = true }
 fidus-estimate = { workspace = true }
 fidus-backend-wayland-layer = { workspace = true, optional = true }
 fidus-backend-x11 = { workspace = true, optional = true }
+fidus-backend-windows = { workspace = true, optional = true }

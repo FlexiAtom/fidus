@@ -98,6 +98,14 @@ pub mod x11 {
     pub use fidus_backend_x11::X11Backend;
 }
 
+/// The Windows backend (layered-window projection + `BitBlt` capture), serving
+/// the Windows desktop. Hosts the L0 Anchor calibrator; L9 needs a layer shell
+/// and is honestly unavailable there.
+#[cfg(all(feature = "windows", windows))]
+pub mod windows {
+    pub use fidus_backend_windows::WindowsBackend;
+}
+
 pub mod prelude {
     //! Everything a typical caller needs.
 

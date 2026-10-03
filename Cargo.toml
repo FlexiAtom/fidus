@@ -4,6 +4,7 @@ members = [
     "crates/fidus-core",
     "crates/fidus-backend-wayland-layer",
     "crates/fidus-backend-x11",
+    "crates/fidus-backend-windows",
     "crates/fidus-calibrate",
     "crates/fidus-estimate",
     "crates/fidus",
@@ -20,6 +21,7 @@ license = "Apache-2.0"
 fidus-core = { path = "crates/fidus-core" }
 fidus-backend-wayland-layer = { path = "crates/fidus-backend-wayland-layer" }
 fidus-backend-x11 = { path = "crates/fidus-backend-x11" }
+fidus-backend-windows = { path = "crates/fidus-backend-windows" }
 fidus-calibrate = { path = "crates/fidus-calibrate" }
 fidus-estimate = { path = "crates/fidus-estimate" }
 fidus = { path = "crates/fidus", default-features = false }
